@@ -10,8 +10,11 @@ dist/
 .sdk-out/
 coverage/
 build/bin/
-frontend/dist/
+frontend/dist/*
+!frontend/dist/.gitkeep
 wailsjs/
+frontend/package.json.md5
+/hdu-station
 
 # Frontend dependencies
 node_modules/
