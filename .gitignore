@@ -1,0 +1,15 @@
+# Local configuration and secrets
+config.yaml
+.env
+.env.*
+!.env.example
+
+# Build and generated local output
+bin/
+dist/
+.sdk-out/
+coverage/
+
+# Frontend dependencies
+node_modules/
+
