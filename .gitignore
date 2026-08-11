@@ -9,7 +9,13 @@ bin/
 dist/
 .sdk-out/
 coverage/
+build/bin/
+frontend/dist/
+wailsjs/
 
 # Frontend dependencies
 node_modules/
 
+# Station-owned development data
+.hdu-station/
+outputs/
