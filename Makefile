@@ -1,11 +1,10 @@
-GOCACHE ?= /tmp/hdu-station-gocache
-GOMODCACHE ?= /tmp/hdu-station-gomodcache
-GOPATH ?= /tmp/hdu-station-gopath
+GO ?= go
+WAILS_VERSION ?= v2.14.0
 
-.PHONY: test frontend-check frontend-install build
+.PHONY: test frontend-check frontend-install build package-darwin
 
 test:
-	env GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) GOPATH=$(GOPATH) go test ./...
+	$(GO) test ./...
 	cd frontend && npm test
 
 frontend-check:
@@ -17,4 +16,7 @@ frontend-install:
 
 build: frontend-check
 	mkdir -p build/bin
-	env GOCACHE=$(GOCACHE) GOMODCACHE=$(GOMODCACHE) GOPATH=$(GOPATH) go build -o build/bin/hdu-station ./...
+	$(GO) build -o build/bin/hdu-station ./...
+
+package-darwin:
+	GO=$(GO) WAILS_VERSION=$(WAILS_VERSION) ./scripts/package-darwin.sh
