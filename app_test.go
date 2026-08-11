@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"runtime"
 	"testing"
 
@@ -32,5 +34,35 @@ func TestBootstrapIdentifiesLocalDesktopBuild(t *testing.T) {
 	}
 	if !state.Configuration.CampusConfigured || state.Configuration.DefaultProvider != "openai" {
 		t.Fatalf("unexpected configuration status: %#v", state.Configuration)
+	}
+}
+
+func TestRuntimeAppDefersInitializationUntilStartup(t *testing.T) {
+	called := false
+	app := newRuntimeApp(func() (*App, error) {
+		called = true
+		return NewApp("/tmp/runtime-station", config.Default()), nil
+	})
+
+	if called {
+		t.Fatal("runtime app initialized before Wails startup")
+	}
+	app.startup(context.Background())
+	if !called {
+		t.Fatal("runtime app did not initialize during Wails startup")
+	}
+	if got := app.Bootstrap().DataRoot; got != "/tmp/runtime-station" {
+		t.Fatalf("data root = %q", got)
+	}
+}
+
+func TestRuntimeAppReportsInitializationFailure(t *testing.T) {
+	app := newRuntimeApp(func() (*App, error) {
+		return nil, errors.New("configuration unavailable")
+	})
+
+	app.startup(context.Background())
+	if got := app.Bootstrap().StartupError; got != "configuration unavailable" {
+		t.Fatalf("startup error = %q", got)
 	}
 }

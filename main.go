@@ -13,12 +13,9 @@ import (
 var assets embed.FS
 
 func main() {
-	app, err := createApplication()
-	if err != nil {
-		log.Fatalf("start HDU Station: %v", err)
-	}
+	app := newRuntimeApp(createApplication)
 
-	err = wails.Run(&options.App{
+	err := wails.Run(&options.App{
 		Title:     "HDU Station",
 		Width:     1180,
 		Height:    780,
