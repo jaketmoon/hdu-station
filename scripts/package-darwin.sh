@@ -30,9 +30,10 @@ git -C "$project_dir" archive --format=tar HEAD | tar -x -C "$stage_dir/project"
   export MACOSX_DEPLOYMENT_TARGET=13.0
   export CGO_CFLAGS="${CGO_CFLAGS:+$CGO_CFLAGS }-mmacosx-version-min=13.0"
   export CGO_CXXFLAGS="${CGO_CXXFLAGS:+$CGO_CXXFLAGS }-mmacosx-version-min=13.0"
+  export CGO_LDFLAGS="${CGO_LDFLAGS:+$CGO_LDFLAGS }-mmacosx-version-min=13.0"
   "${GO:-go}" run \
     "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION:-v2.14.0}" \
-    build -clean -platform darwin/arm64 -nosyncgomod
+    build -clean -platform darwin/arm64 -nosyncgomod -m
 )
 
 app_path="$stage_dir/project/build/bin/hdu-station.app"
