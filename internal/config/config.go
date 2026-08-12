@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"sort"
@@ -14,6 +16,7 @@ type Config struct {
 	Models    ModelsConfig    `yaml:"models" json:"models"`
 	Campus    CampusConfig    `yaml:"campus" json:"campus"`
 	WebSearch WebSearchConfig `yaml:"web_search" json:"web_search"`
+	Sandbox   SandboxConfig   `yaml:"sandbox" json:"sandbox"`
 }
 
 type ModelsConfig struct {
@@ -33,10 +36,40 @@ type CampusConfig struct {
 	Key string `yaml:"key" json:"key"`
 }
 
+// CampusAuthStatus is deliberately derived from local configuration. It does
+// not probe Neo or expose the credential itself. The current Neo contract only
+// permits the RFC 8628 device flow for hduhelp-cli; Station must therefore not
+// pretend that it has a first-party device client until the server registers
+// one explicitly.
+type CampusAuthStatus struct {
+	State                    string `json:"state"`
+	Configured               bool   `json:"configured"`
+	Method                   string `json:"method"`
+	DeviceAuthorization      string `json:"deviceAuthorization"`
+	ServerClientRegistration bool   `json:"serverClientRegistrationRequired"`
+	Notice                   string `json:"notice"`
+}
+
+const (
+	CampusAuthNotConfigured = "not_configured"
+	CampusAuthPATConfigured = "pat_configured_unverified"
+	CampusAuthPATVerified   = "pat_verified"
+	CampusAuthPATRejected   = "pat_rejected"
+	CampusAuthScopeMissing  = "scope_missing"
+	CampusAuthUnavailable   = "unavailable"
+)
+
 type WebSearchConfig struct {
 	Provider  string `yaml:"provider" json:"provider"`
 	BraveKey  string `yaml:"brave_api_key,omitempty" json:"brave_api_key,omitempty"`
 	TavilyKey string `yaml:"tavily_api_key,omitempty" json:"tavily_api_key,omitempty"`
+}
+
+type SandboxConfig struct {
+	ImageURL       string `yaml:"image_url,omitempty" json:"image_url,omitempty"`
+	ImageSHA256    string `yaml:"image_sha256,omitempty" json:"image_sha256,omitempty"`
+	ImageSignature string `yaml:"image_signature,omitempty" json:"image_signature,omitempty"`
+	ImagePublicKey string `yaml:"image_public_key,omitempty" json:"image_public_key,omitempty"`
 }
 
 func Default() Config {
@@ -87,6 +120,10 @@ func FromEnvironment(lookup func(string) string) Config {
 	}
 	cfg.WebSearch.BraveKey = lookup("HDU_STATION_BRAVE_SEARCH_API_KEY")
 	cfg.WebSearch.TavilyKey = lookup("HDU_STATION_TAVILY_API_KEY")
+	cfg.Sandbox.ImageURL = lookup("HDU_STATION_SANDBOX_IMAGE_URL")
+	cfg.Sandbox.ImageSHA256 = lookup("HDU_STATION_SANDBOX_IMAGE_SHA256")
+	cfg.Sandbox.ImageSignature = lookup("HDU_STATION_SANDBOX_IMAGE_SIGNATURE")
+	cfg.Sandbox.ImagePublicKey = lookup("HDU_STATION_SANDBOX_IMAGE_PUBLIC_KEY")
 
 	if openAI.APIKey != "" && openAI.Model != "" {
 		cfg.Models.Default = "openai"
@@ -134,6 +171,43 @@ func (cfg Config) Validate() error {
 	default:
 		return fmt.Errorf("web_search.provider must be duckduckgo, brave, or tavily")
 	}
+	if err := validateSandbox(cfg.Sandbox); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSandbox(sandbox SandboxConfig) error {
+	imageURL := strings.TrimSpace(sandbox.ImageURL)
+	imageSHA256 := strings.TrimSpace(sandbox.ImageSHA256)
+	signature := strings.TrimSpace(sandbox.ImageSignature)
+	publicKey := strings.TrimSpace(sandbox.ImagePublicKey)
+	if imageURL == "" && imageSHA256 == "" && signature == "" && publicKey == "" {
+		return nil
+	}
+	if imageURL == "" || imageSHA256 == "" {
+		return fmt.Errorf("sandbox.image_url and sandbox.image_sha256 must be provided together")
+	}
+	parsed, err := url.Parse(imageURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
+		return fmt.Errorf("sandbox.image_url must be an HTTPS URL without userinfo, query, or fragment")
+	}
+	if len(imageSHA256) != 64 {
+		return fmt.Errorf("sandbox.image_sha256 must be a 64-character hexadecimal SHA-256 digest")
+	}
+	if _, err := hex.DecodeString(imageSHA256); err != nil {
+		return fmt.Errorf("sandbox.image_sha256 must be a 64-character hexadecimal SHA-256 digest")
+	}
+	if (signature == "") != (publicKey == "") {
+		return fmt.Errorf("sandbox.image_signature and sandbox.image_public_key must be provided together")
+	}
+	if signature != "" {
+		decodedSignature, signatureErr := base64.StdEncoding.DecodeString(signature)
+		decodedPublicKey, publicKeyErr := base64.StdEncoding.DecodeString(publicKey)
+		if signatureErr != nil || len(decodedSignature) != 64 || publicKeyErr != nil || len(decodedPublicKey) != 32 {
+			return fmt.Errorf("sandbox image signature and public key must be base64 Ed25519 values")
+		}
+	}
 	return nil
 }
 
@@ -166,6 +240,27 @@ func (cfg Config) Status() Status {
 	}
 	sort.Strings(status.ConfiguredProviders)
 	return status
+}
+
+func (cfg Config) CampusAuthStatus() CampusAuthStatus {
+	if strings.TrimSpace(cfg.Campus.Key) == "" {
+		return CampusAuthStatus{
+			State:                    CampusAuthNotConfigured,
+			Configured:               false,
+			Method:                   "none",
+			DeviceAuthorization:      "unavailable",
+			ServerClientRegistration: true,
+			Notice:                   "请填写杭电校园 Key；Station 的正式设备授权客户端尚未注册。",
+		}
+	}
+	return CampusAuthStatus{
+		State:                    CampusAuthPATConfigured,
+		Configured:               true,
+		Method:                   "pat",
+		DeviceAuthorization:      "unavailable",
+		ServerClientRegistration: true,
+		Notice:                   "当前使用本机配置的校园 Key；不会把它交给 Sandbox。Station 的正式设备授权客户端尚未注册。",
+	}
 }
 
 type Status struct {

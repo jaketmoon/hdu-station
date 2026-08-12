@@ -14,9 +14,17 @@ Implement one user-visible capability at a time:
 ## Credential handling
 
 - Real values live only in ignored `.env` or the product YAML file.
+- `.env` seeds a new Station configuration only. Once `config.yaml` exists,
+  change the campus PAT through Station settings; it deliberately does not
+  synchronize with hduhelp-cli's separate local configuration.
 - Tests use fake values and local HTTP servers.
 - Never place tokens in command arguments, snapshots, fixtures or logs.
 - Tencent credentials remain owned by the official CLI/keychain.
+- Tencent CLI downloads use the pinned platform package manifest in
+  `internal/tools/tencent_install.go`; update the version and every platform
+  integrity together from official npm metadata. The runtime must use only the
+  verified binary below the Station data root, never a same-named host-PATH
+  executable.
 
 ## Reuse from hdu-mate
 
@@ -31,4 +39,3 @@ make build
 ```
 
 Before a phase is declared complete, perform an independent code-quality and over-design review and resolve material findings.
-

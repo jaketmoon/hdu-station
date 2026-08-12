@@ -42,6 +42,11 @@ func (s *Store) Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// Tighten permissions for installations written before private YAML was
+	// enforced. The file contains API keys and the campus PAT.
+	if err := os.Chmod(s.path, 0o600); err != nil {
+		return Config{}, fmt.Errorf("secure config permissions: %w", err)
+	}
 	var cfg Config
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
