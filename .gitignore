@@ -22,3 +22,5 @@ node_modules/
 # Station-owned development data
 .hdu-station/
 outputs/
+frontend/test-results/
+frontend/playwright-report/

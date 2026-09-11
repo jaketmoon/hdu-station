@@ -1,270 +1,107 @@
 package config
 
 import (
-	"encoding/base64"
-	"encoding/hex"
-	"fmt"
+	"errors"
+	"gopkg.in/yaml.v3"
 	"net/url"
-	"sort"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
-const CurrentVersion = 1
+const AppDirectory = "HDU Station Course"
 
+var OwnedEntries = []string{"config.yaml", "station.db", "station.db-wal", "station.db-shm", "tools", "logs"}
+
+type Model struct {
+	BaseURL string `yaml:"base_url"`
+	APIKey  string `yaml:"api_key" json:"-"`
+	Name    string `yaml:"name"`
+}
 type Config struct {
-	Version   int             `yaml:"version" json:"version"`
-	Models    ModelsConfig    `yaml:"models" json:"models"`
-	Campus    CampusConfig    `yaml:"campus" json:"campus"`
-	WebSearch WebSearchConfig `yaml:"web_search" json:"web_search"`
-	Sandbox   SandboxConfig   `yaml:"sandbox" json:"sandbox"`
-}
-
-type ModelsConfig struct {
-	Default   string                    `yaml:"default" json:"default"`
-	Providers map[string]ProviderConfig `yaml:"providers" json:"providers"`
-}
-
-type ProviderConfig struct {
-	Type     string `yaml:"type" json:"type"`
-	Protocol string `yaml:"protocol,omitempty" json:"protocol,omitempty"`
-	BaseURL  string `yaml:"base_url" json:"base_url"`
-	APIKey   string `yaml:"api_key" json:"api_key"`
-	Model    string `yaml:"model" json:"model"`
-}
-
-type CampusConfig struct {
-	Key string `yaml:"key" json:"key"`
-}
-
-// CampusAuthStatus is deliberately derived from local configuration. It does
-// not probe Neo or expose the credential itself. The current Neo contract only
-// permits the RFC 8628 device flow for hduhelp-cli; Station must therefore not
-// pretend that it has a first-party device client until the server registers
-// one explicitly.
-type CampusAuthStatus struct {
-	State                    string `json:"state"`
-	Configured               bool   `json:"configured"`
-	Method                   string `json:"method"`
-	DeviceAuthorization      string `json:"deviceAuthorization"`
-	ServerClientRegistration bool   `json:"serverClientRegistrationRequired"`
-	Notice                   string `json:"notice"`
-}
-
-const (
-	CampusAuthNotConfigured = "not_configured"
-	CampusAuthPATConfigured = "pat_configured_unverified"
-	CampusAuthPATVerified   = "pat_verified"
-	CampusAuthPATRejected   = "pat_rejected"
-	CampusAuthScopeMissing  = "scope_missing"
-	CampusAuthUnavailable   = "unavailable"
-)
-
-type WebSearchConfig struct {
-	Provider  string `yaml:"provider" json:"provider"`
-	BraveKey  string `yaml:"brave_api_key,omitempty" json:"brave_api_key,omitempty"`
-	TavilyKey string `yaml:"tavily_api_key,omitempty" json:"tavily_api_key,omitempty"`
-}
-
-type SandboxConfig struct {
-	ImageURL       string `yaml:"image_url,omitempty" json:"image_url,omitempty"`
-	ImageSHA256    string `yaml:"image_sha256,omitempty" json:"image_sha256,omitempty"`
-	ImageSignature string `yaml:"image_signature,omitempty" json:"image_signature,omitempty"`
-	ImagePublicKey string `yaml:"image_public_key,omitempty" json:"image_public_key,omitempty"`
+	Version   int    `yaml:"version"`
+	Model     Model  `yaml:"model"`
+	CampusKey string `yaml:"campus_key,omitempty" json:"-"`
 }
 
 func Default() Config {
-	return Config{
-		Version: CurrentVersion,
-		Models: ModelsConfig{
-			Providers: map[string]ProviderConfig{
-				"openai": {
-					Type:     "openai",
-					Protocol: "responses",
-					BaseURL:  "https://api.openai.com/v1",
-				},
-				"anthropic": {
-					Type:     "anthropic",
-					Protocol: "messages",
-					BaseURL:  "https://api.anthropic.com",
-				},
-			},
-		},
-		WebSearch: WebSearchConfig{Provider: "duckduckgo"},
-	}
+	return Config{Version: 1, Model: Model{BaseURL: "https://api.deepseek.com", Name: "deepseek-flash"}}
 }
-
-func FromEnvironment(lookup func(string) string) Config {
-	cfg := Default()
-	openAI := cfg.Models.Providers["openai"]
-	openAI.APIKey = lookup("HDU_STATION_OPENAI_API_KEY")
-	openAI.Model = lookup("HDU_STATION_OPENAI_MODEL")
-	if value := lookup("HDU_STATION_OPENAI_BASE_URL"); value != "" {
-		openAI.BaseURL = value
+func Root() (string, error) {
+	if root := os.Getenv("HDU_STATION_DATA_ROOT"); root != "" {
+		if !filepath.IsAbs(root) || filepath.Clean(root) == string(filepath.Separator) {
+			return "", errors.New("应用数据目录必须是独立的绝对路径")
+		}
+		return filepath.Clean(root), nil
 	}
-	if value := lookup("HDU_STATION_OPENAI_PROTOCOL"); value != "" {
-		openAI.Protocol = value
-	}
-	cfg.Models.Providers["openai"] = openAI
-
-	anthropic := cfg.Models.Providers["anthropic"]
-	anthropic.APIKey = lookup("HDU_STATION_ANTHROPIC_API_KEY")
-	anthropic.Model = lookup("HDU_STATION_ANTHROPIC_MODEL")
-	if value := lookup("HDU_STATION_ANTHROPIC_BASE_URL"); value != "" {
-		anthropic.BaseURL = value
-	}
-	cfg.Models.Providers["anthropic"] = anthropic
-
-	cfg.Campus.Key = lookup("HDU_STATION_CAMPUS_KEY")
-	if value := lookup("HDU_STATION_WEB_SEARCH_PROVIDER"); value != "" {
-		cfg.WebSearch.Provider = value
-	}
-	cfg.WebSearch.BraveKey = lookup("HDU_STATION_BRAVE_SEARCH_API_KEY")
-	cfg.WebSearch.TavilyKey = lookup("HDU_STATION_TAVILY_API_KEY")
-	cfg.Sandbox.ImageURL = lookup("HDU_STATION_SANDBOX_IMAGE_URL")
-	cfg.Sandbox.ImageSHA256 = lookup("HDU_STATION_SANDBOX_IMAGE_SHA256")
-	cfg.Sandbox.ImageSignature = lookup("HDU_STATION_SANDBOX_IMAGE_SIGNATURE")
-	cfg.Sandbox.ImagePublicKey = lookup("HDU_STATION_SANDBOX_IMAGE_PUBLIC_KEY")
-
-	if openAI.APIKey != "" && openAI.Model != "" {
-		cfg.Models.Default = "openai"
-	} else if anthropic.APIKey != "" && anthropic.Model != "" {
-		cfg.Models.Default = "anthropic"
-	}
-	return cfg
+	base, err := os.UserConfigDir()
+	return filepath.Join(base, AppDirectory), err
 }
-
-func (cfg Config) Validate() error {
-	if cfg.Version != CurrentVersion {
-		return fmt.Errorf("version must be %d", CurrentVersion)
+func (c Config) Validate() error {
+	if c.Version != 1 {
+		return errors.New("配置版本不受支持，请使用对应版本的应用")
 	}
-	if cfg.Models.Providers == nil {
-		return fmt.Errorf("models.providers is required")
+	u, err := url.Parse(c.Model.BaseURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("模型地址需为 HTTPS 地址，不含凭证或查询参数")
 	}
-	if cfg.Models.Default != "" {
-		if _, ok := cfg.Models.Providers[cfg.Models.Default]; !ok {
-			return fmt.Errorf("models.default %q does not name a configured provider", cfg.Models.Default)
-		}
+	if c.Model.Name != "deepseek-flash" && c.Model.Name != "deepseek-v4.1-flash" {
+		return errors.New("请使用 DeepSeek V4.1 Flash 的模型名称")
 	}
-
-	providerNames := make([]string, 0, len(cfg.Models.Providers))
-	for name := range cfg.Models.Providers {
-		providerNames = append(providerNames, name)
+	if len(c.Model.APIKey) > 4096 || strings.ContainsAny(c.Model.APIKey, "\r\n") {
+		return errors.New("API Key 格式不正确")
 	}
-	sort.Strings(providerNames)
-	for _, name := range providerNames {
-		provider := cfg.Models.Providers[name]
-		if err := validateProvider(name, provider); err != nil {
-			return err
-		}
+	return nil
+}
+func Load(root string) (Config, error) {
+	path := filepath.Join(root, "config.yaml")
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return Default(), nil
 	}
-
-	switch cfg.WebSearch.Provider {
-	case "duckduckgo":
-	case "brave":
-		if strings.TrimSpace(cfg.WebSearch.BraveKey) == "" {
-			return fmt.Errorf("web_search.brave_api_key is required for brave")
-		}
-	case "tavily":
-		if strings.TrimSpace(cfg.WebSearch.TavilyKey) == "" {
-			return fmt.Errorf("web_search.tavily_api_key is required for tavily")
-		}
-	default:
-		return fmt.Errorf("web_search.provider must be duckduckgo, brave, or tavily")
+	if err != nil {
+		return Config{}, errors.New("无法读取本机配置")
 	}
-	if err := validateSandbox(cfg.Sandbox); err != nil {
+	var c Config
+	if yaml.Unmarshal(data, &c) != nil {
+		return Config{}, errors.New("本机配置格式不正确")
+	}
+	if err := c.Validate(); err != nil {
+		return Config{}, err
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		return Config{}, errors.New("无法保护配置文件权限")
+	}
+	return c, nil
+}
+func Save(root string, c Config) error {
+	if err := c.Validate(); err != nil {
 		return err
 	}
-	return nil
-}
-
-func validateSandbox(sandbox SandboxConfig) error {
-	imageURL := strings.TrimSpace(sandbox.ImageURL)
-	imageSHA256 := strings.TrimSpace(sandbox.ImageSHA256)
-	signature := strings.TrimSpace(sandbox.ImageSignature)
-	publicKey := strings.TrimSpace(sandbox.ImagePublicKey)
-	if imageURL == "" && imageSHA256 == "" && signature == "" && publicKey == "" {
-		return nil
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return errors.New("无法创建应用数据目录")
 	}
-	if imageURL == "" || imageSHA256 == "" {
-		return fmt.Errorf("sandbox.image_url and sandbox.image_sha256 must be provided together")
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return errors.New("无法保存配置")
 	}
-	parsed, err := url.Parse(imageURL)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
-		return fmt.Errorf("sandbox.image_url must be an HTTPS URL without userinfo, query, or fragment")
+	f, err := os.CreateTemp(root, ".config-*")
+	if err != nil {
+		return errors.New("无法保存配置")
 	}
-	if len(imageSHA256) != 64 {
-		return fmt.Errorf("sandbox.image_sha256 must be a 64-character hexadecimal SHA-256 digest")
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if _, err = f.Write(data); err != nil {
+		return errors.New("无法保存配置")
 	}
-	if _, err := hex.DecodeString(imageSHA256); err != nil {
-		return fmt.Errorf("sandbox.image_sha256 must be a 64-character hexadecimal SHA-256 digest")
+	if err = f.Sync(); err != nil {
+		return errors.New("无法保存配置")
 	}
-	if (signature == "") != (publicKey == "") {
-		return fmt.Errorf("sandbox.image_signature and sandbox.image_public_key must be provided together")
+	if err = f.Close(); err != nil {
+		return errors.New("无法保存配置")
 	}
-	if signature != "" {
-		decodedSignature, signatureErr := base64.StdEncoding.DecodeString(signature)
-		decodedPublicKey, publicKeyErr := base64.StdEncoding.DecodeString(publicKey)
-		if signatureErr != nil || len(decodedSignature) != 64 || publicKeyErr != nil || len(decodedPublicKey) != 32 {
-			return fmt.Errorf("sandbox image signature and public key must be base64 Ed25519 values")
-		}
+	if err = os.Rename(f.Name(), filepath.Join(root, "config.yaml")); err != nil {
+		return errors.New("无法保存配置")
 	}
 	return nil
-}
-
-func validateProvider(name string, provider ProviderConfig) error {
-	switch provider.Type {
-	case "openai":
-		if provider.Protocol != "responses" && provider.Protocol != "chat_completions" {
-			return fmt.Errorf("models.providers.%s.protocol must be responses or chat_completions", name)
-		}
-	case "anthropic":
-		if provider.Protocol != "messages" {
-			return fmt.Errorf("models.providers.%s.protocol must be messages", name)
-		}
-	default:
-		return fmt.Errorf("models.providers.%s.type must be openai or anthropic", name)
-	}
-	parsed, err := url.Parse(provider.BaseURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return fmt.Errorf("models.providers.%s.base_url must be an HTTP(S) URL", name)
-	}
-	return nil
-}
-
-func (cfg Config) Status() Status {
-	status := Status{CampusConfigured: cfg.Campus.Key != "", DefaultProvider: cfg.Models.Default}
-	for name, provider := range cfg.Models.Providers {
-		if provider.APIKey != "" && provider.Model != "" {
-			status.ConfiguredProviders = append(status.ConfiguredProviders, name)
-		}
-	}
-	sort.Strings(status.ConfiguredProviders)
-	return status
-}
-
-func (cfg Config) CampusAuthStatus() CampusAuthStatus {
-	if strings.TrimSpace(cfg.Campus.Key) == "" {
-		return CampusAuthStatus{
-			State:                    CampusAuthNotConfigured,
-			Configured:               false,
-			Method:                   "none",
-			DeviceAuthorization:      "unavailable",
-			ServerClientRegistration: true,
-			Notice:                   "请填写杭电校园 Key；Station 的正式设备授权客户端尚未注册。",
-		}
-	}
-	return CampusAuthStatus{
-		State:                    CampusAuthPATConfigured,
-		Configured:               true,
-		Method:                   "pat",
-		DeviceAuthorization:      "unavailable",
-		ServerClientRegistration: true,
-		Notice:                   "当前使用本机配置的校园 Key；不会把它交给 Sandbox。Station 的正式设备授权客户端尚未注册。",
-	}
-}
-
-type Status struct {
-	CampusConfigured    bool     `json:"campusConfigured"`
-	DefaultProvider     string   `json:"defaultProvider"`
-	ConfiguredProviders []string `json:"configuredProviders"`
 }

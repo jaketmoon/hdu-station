@@ -2,154 +2,84 @@ package tools
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"os"
-	"path/filepath"
+	"errors"
 	"strings"
 	"testing"
 )
 
-func TestTencentSearchGuildFeedUsesOnlyReadOnlySearchCommand(t *testing.T) {
-	tool := newTencentSearchGuildFeedToolForTest("tencent-channel-cli", func(_ context.Context, binary string, arguments ...string) ([]byte, error) {
-		if binary != "tencent-channel-cli" {
-			t.Errorf("binary = %q", binary)
+func TestCourseToolsOnlyReturnVisibleFieldsAndReadSearchedPosts(t *testing.T) {
+	calls := []string{}
+	client := &Client{run: func(ctx context.Context, args ...string) (json.RawMessage, error) {
+		command := strings.Join(args, " ")
+		calls = append(calls, command)
+		if strings.Contains(command, "search-guild-feeds") {
+			return json.RawMessage(`{"guild_feeds":[{"feed_id":"feed1","title":"好课推荐","create_time":"2026-08-01","comment_count":1,"author_id":"identity-sentinel","token":"secret-sentinel"}]}`), nil
 		}
-		want := []string{"feed", "search-guild-feeds", "--guild-id", "123456", "--query", "选课", "--json"}
-		if strings.Join(arguments, "\x00") != strings.Join(want, "\x00") {
-			t.Errorf("arguments = %#v, want %#v", arguments, want)
+		if strings.Contains(command, "get-feed-detail") {
+			return json.RawMessage(`{"feed":{"title":"好课推荐","content":"艺术鉴赏，期末小论文。","share_url":"https://pd.qq.com/s/example","author_id":"identity-sentinel"}}`), nil
 		}
-		return []byte(`{"feeds":[]}`), nil
-	})
-	tool.allowedGuildIDs = map[string]struct{}{"123456": {}}
-
-	arguments, err := json.Marshal(map[string]string{"guild_id": "123456", "query": "选课"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := tool.Call(context.Background(), arguments)
-	if err != nil || result.Text != `{"feeds":[]}` {
-		t.Fatalf("unexpected result: %#v, %v", result, err)
-	}
-}
-
-func TestTencentSearchGuildFeedSanitizesConnectorFieldsBeforeReturningToAgent(t *testing.T) {
-	tool := newTencentSearchGuildFeedToolForTest("tencent-channel-cli", func(context.Context, string, ...string) ([]byte, error) {
-		return []byte(`{"feeds":[{"feed_id":"internal-feed","guild_id":"internal-guild","title":"选课经验","content":"这是一条社区信号","create_time":"2026-08-12 10:00:00","author":{"tiny_id":"private-user","nickname":"不应透传","name":"也不应透传"},"share_url":"https://pd.qq.com/s/example","raw":{"access_token":"secret-token"}}],"cookie":"pagination-secret"}`), nil
-	})
-	tool.allowedGuildIDs = map[string]struct{}{"123456": {}}
-
-	result, err := tool.Call(context.Background(), json.RawMessage(`{"guild_id":"123456","query":"选课"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, forbidden := range []string{"internal-feed", "internal-guild", "private-user", "不应透传", "secret-token", "pagination-secret", "feed_id", "guild_id", "access_token"} {
-		if strings.Contains(result.Text, forbidden) {
-			t.Fatalf("sanitized Tencent result contains %q: %s", forbidden, result.Text)
+		if strings.Contains(command, "get-feed-comments") {
+			return json.RawMessage(`{"comments":[{"content":{"text":"作业不多"},"replies_preview":[{"content_text":"不同老师考核不同"}]}],"has_more":false}`), nil
 		}
+		return nil, errors.New("unexpected command")
+	}}
+	s := NewSession(client, []string{"test-scope"}, nil)
+	invalid, err := s.Read(context.Background(), ReadInput{Posts: []string{"made-up"}})
+	if err != nil || len(invalid.Warnings) == 0 || len(calls) != 0 {
+		t.Fatal("forged reference reached CLI")
 	}
-	for _, expected := range []string{"选课经验", "这是一条社区信号", "2026-08-12 10:00:00", "share_url"} {
-		if !strings.Contains(result.Text, expected) {
-			t.Fatalf("sanitized Tencent result lost %q: %s", expected, result.Text)
+	search, err := s.Search(context.Background(), SearchInput{Query: "通识选修"})
+	if err != nil || len(search.Posts) != 1 {
+		t.Fatal("search failed")
+	}
+	read, err := s.Read(context.Background(), ReadInput{Posts: []string{search.Posts[0].ID}})
+	if err != nil || len(read.Posts) != 1 || len(read.Posts[0].Discussion) != 2 {
+		t.Fatal("discussion was lost")
+	}
+	for _, result := range []any{search, read} {
+		data, _ := json.Marshal(result)
+		for _, secret := range []string{"secret-sentinel", "identity-sentinel", "test-scope", "feed1"} {
+			if strings.Contains(string(data), secret) {
+				t.Fatal("internal data crossed tool boundary")
+			}
 		}
 	}
-}
-
-func TestTencentSearchGuildFeedRejectsNonJSONResponse(t *testing.T) {
-	tool := newTencentSearchGuildFeedToolForTest("cli", func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("not-json"), nil
-	})
-	tool.allowedGuildIDs = map[string]struct{}{"123456": {}}
-	_, err := tool.Call(context.Background(), json.RawMessage(`{"guild_id":"123456","query":"选课"}`))
-	if err == nil || !strings.Contains(err.Error(), "decode Tencent Channel response") {
-		t.Fatalf("unexpected non-JSON error: %v", err)
+	count := len(calls)
+	_, _ = s.Read(context.Background(), ReadInput{Posts: []string{search.Posts[0].ID}})
+	if len(calls) != count {
+		t.Fatal("duplicate post was read twice")
+	}
+	if len(calls) != 3 {
+		t.Fatalf("unexpected operations: %d", len(calls))
 	}
 }
-
-func TestTencentSearchGuildFeedDoesNotFallbackWhenCLIIsMissing(t *testing.T) {
-	tool := newTencentSearchGuildFeedToolForTest("", nil)
-	tool.allowedGuildIDs = map[string]struct{}{"123456": {}}
-	arguments := json.RawMessage(`{"guild_id":"123456","query":"选课"}`)
-	_, err := tool.Call(context.Background(), arguments)
-	if err == nil || !strings.Contains(err.Error(), "not installed in the Station data root") {
-		t.Fatalf("unexpected error: %v", err)
+func TestPartialChannelsStayUsefulAndEmptyIsNotFailure(t *testing.T) {
+	client := &Client{run: func(_ context.Context, args ...string) (json.RawMessage, error) {
+		if strings.Contains(strings.Join(args, " "), "unavailable") {
+			return nil, errors.New("频道暂时不可用")
+		}
+		return json.RawMessage(`{"guild_feeds":[]}`), nil
+	}}
+	s := NewSession(client, []string{"available", "unavailable"}, nil)
+	result, err := s.Search(context.Background(), SearchInput{Query: "课程"})
+	if err != nil || len(result.Warnings) != 1 || len(result.Posts) != 0 {
+		t.Fatal("failure was treated as empty evidence")
 	}
 }
-
-func TestTencentCLIPathDoesNotUseHostPATH(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	if path := tencentCLIPath(t.TempDir(), "darwin", "arm64"); path != "" {
-		t.Fatalf("uninstalled Station CLI path = %q", path)
+func TestNoCLIForFlagInjectionAndUnsupportedPlatform(t *testing.T) {
+	client := &Client{run: func(context.Context, ...string) (json.RawMessage, error) {
+		t.Fatal("unexpected execution")
+		return nil, nil
+	}}
+	result, _ := NewSession(client, []string{"scope"}, nil).Search(context.Background(), SearchInput{Query: "--help"})
+	if len(result.Warnings) == 0 {
+		t.Fatal("invalid query accepted")
 	}
-}
-
-func TestTencentCLIPathRequiresVerifiedStationInstall(t *testing.T) {
-	root := t.TempDir()
-	packageInfo, err := tencentPackageFor("windows", "amd64")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := tencentPackageFor("plan9", "amd64"); err == nil {
+		t.Fatal("unsupported platform silently accepted")
 	}
-	installRoot := filepath.Join(root, "tools", "tencent-channel-cli", tencentCLIVersion)
-	if err := os.MkdirAll(installRoot, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	binary := []byte("verified Station CLI")
-	binaryPath := filepath.Join(installRoot, "tencent-channel-cli.exe")
-	if err := os.WriteFile(binaryPath, binary, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	digest := sha256.Sum256(binary)
-	marker, err := json.Marshal(tencentInstallMarker{PackageIntegrity: packageInfo.Integrity, BinarySHA256: hex.EncodeToString(digest[:])})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(installRoot, "install.json"), marker, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if path := tencentCLIPath(root, "windows", "amd64"); path != binaryPath {
-		t.Fatalf("verified Station CLI path = %q, want %q", path, binaryPath)
-	}
-}
-
-func TestTencentSearchGuildFeedRejectsUnconfiguredOrUnknownGuild(t *testing.T) {
-	tool := newTencentSearchGuildFeedToolForTest("cli", func(context.Context, string, ...string) ([]byte, error) { return nil, nil })
-	arguments := json.RawMessage(`{"guild_id":"123456","query":"选课"}`)
-	if _, err := tool.Call(context.Background(), arguments); err == nil || !strings.Contains(err.Error(), "index is not configured") {
-		t.Fatalf("unconfigured channel index was accepted: %v", err)
-	}
-	tool.allowedGuildIDs = map[string]struct{}{"654321": {}}
-	if _, err := tool.Call(context.Background(), arguments); err == nil || !strings.Contains(err.Error(), "outside") {
-		t.Fatalf("unknown guild was accepted: %v", err)
-	}
-}
-
-func TestTencentSearchGuildFeedDefinitionPinsConfiguredGuilds(t *testing.T) {
-	tool := NewTencentSearchGuildFeedToolForGuilds("cli", "654321", "123456", "654321")
-	var definition Definition
-	definition = tool.Definition()
-	var schema struct {
-		Properties struct {
-			GuildID struct {
-				Enum []string `json:"enum"`
-			} `json:"guild_id"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(definition.Parameters, &schema); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(schema.Properties.GuildID.Enum, ",") != "123456,654321" {
-		t.Fatalf("guild enum = %#v", schema.Properties.GuildID.Enum)
-	}
-}
-
-func TestTencentSearchGuildFeedRejectsNonNumericGuildID(t *testing.T) {
-	tool := newTencentSearchGuildFeedToolForTest("cli", func(context.Context, string, ...string) ([]byte, error) {
-		return []byte(`{"feeds":[]}`), nil
-	})
-	tool.allowedGuildIDs = map[string]struct{}{"123456": {}}
-	_, err := tool.Call(context.Background(), json.RawMessage(`{"guild_id":"guild-1","query":"选课"}`))
-	if err == nil || !strings.Contains(err.Error(), "only 1 to 32 digits") {
-		t.Fatalf("non-numeric guild ID was accepted: %v", err)
+	if got := NewClient(t.TempDir()).Status(context.Background()); got != "not_installed" {
+		t.Fatalf("missing binary status = %s", got)
 	}
 }

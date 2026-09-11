@@ -2,96 +2,79 @@ package storage
 
 import (
 	"context"
-	"strings"
+	"database/sql"
+	"path/filepath"
 	"testing"
 )
 
-func TestStorePersistsConversationsAndMessages(t *testing.T) {
-	store, err := Open(t.TempDir())
+func TestMessagesSurviveRestartAndInterruptedTurnIsMarked(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	s, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
-
-	conversation, err := store.CreateConversation(context.Background(), "  选课助手  ")
+	c, u, a, err := s.Begin(ctx, "", "通识选修怎么选？")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if conversation.Title != "选课助手" {
-		t.Fatalf("title = %q", conversation.Title)
-	}
-	if _, err := store.AppendMessage(context.Background(), conversation.ID, messageRoleUser, "帮我看看这学期能选什么课"); err != nil {
+	a.Content = "已经生成的部分"
+	if err := s.Finish(ctx, a); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AppendMessage(context.Background(), conversation.ID, messageRoleAssistant, "我先整理课程和时间冲突。"); err != nil {
-		t.Fatal(err)
-	}
-
-	messages, err := store.ListMessages(context.Background(), conversation.ID)
+	s.Close()
+	s, err = Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 2 || messages[0].Role != messageRoleUser || messages[1].Role != messageRoleAssistant {
-		t.Fatalf("unexpected messages: %#v", messages)
+	defer s.Close()
+	messages, err := s.Messages(ctx, c.ID)
+	if err != nil || len(messages) != 2 || messages[0].ID != u.ID || messages[1].State != "interrupted" || messages[1].Content != a.Content {
+		t.Fatal("restart lost visible messages")
 	}
-
-	conversations, err := store.ListConversations(context.Background())
-	if err != nil {
+	if err := s.Delete(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
-	if len(conversations) != 1 || conversations[0].ID != conversation.ID {
-		t.Fatalf("unexpected conversations: %#v", conversations)
+	messages, _ = s.Messages(ctx, c.ID)
+	if len(messages) != 0 {
+		t.Fatal("conversation deletion did not cascade")
 	}
 }
-
-func TestStoreRejectsInvalidMessageAndMissingConversation(t *testing.T) {
-	store, err := Open(t.TempDir())
+func TestInvalidConversationDoesNotLeaveHalfTurn(t *testing.T) {
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
-
-	if _, err := store.AppendMessage(context.Background(), "missing", messageRoleUser, "hello"); err == nil || !strings.Contains(err.Error(), "does not exist") {
-		t.Fatalf("unexpected missing conversation error: %v", err)
+	defer s.Close()
+	_, _, _, err = s.Begin(context.Background(), "missing", "hello")
+	if err == nil {
+		t.Fatal("missing conversation accepted")
 	}
-	conversation, err := store.CreateConversation(context.Background(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if conversation.Title != "新对话" {
-		t.Fatalf("default title = %q", conversation.Title)
-	}
-	if _, err := store.AppendMessage(context.Background(), conversation.ID, "system", "hello"); err == nil {
-		t.Fatal("unsupported role should fail")
+	items, _ := s.Conversations(context.Background())
+	if len(items) != 0 {
+		t.Fatal("failed transaction left a conversation")
 	}
 }
-
-func TestStorePersistsToolAuditWithoutToolResultPayload(t *testing.T) {
-	store, err := Open(t.TempDir())
+func TestFutureSchemaIsNotRewritten(t *testing.T) {
+	root := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(root, "station.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
-	conversation, err := store.CreateConversation(context.Background(), "审计")
+	_, err = db.Exec("PRAGMA user_version=99")
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := store.AppendToolAudit(context.Background(), conversation.ID, "hdu_academic_schedule", ToolAuditStarted, "")
-	if err != nil {
-		t.Fatal(err)
+	db.Close()
+	if s, err := Open(root); err == nil {
+		s.Close()
+		t.Fatal("future schema accepted")
 	}
-	if started.Status != ToolAuditStarted || started.Detail != "" {
-		t.Fatalf("unexpected started audit: %#v", started)
-	}
-	_, err = store.AppendToolAudit(context.Background(), conversation.ID, "hdu_academic_schedule", ToolAuditFailed, strings.Repeat("x", auditDetailLimit+20))
-	if err != nil {
-		t.Fatal(err)
-	}
-	audits, err := store.ListToolAudits(context.Background(), conversation.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(audits) != 2 || len([]rune(audits[1].Detail)) != auditDetailLimit {
-		t.Fatalf("unexpected audits: %#v", audits)
+	db, _ = sql.Open("sqlite", filepath.Join(root, "station.db"))
+	defer db.Close()
+	var version int
+	_ = db.QueryRow("PRAGMA user_version").Scan(&version)
+	if version != 99 {
+		t.Fatal("future database mutated")
 	}
 }

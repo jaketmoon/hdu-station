@@ -13,18 +13,22 @@ import (
 var assets embed.FS
 
 func main() {
-	app := newRuntimeApp(createApplication)
+	app, err := createApplication()
+	if err != nil {
+		log.Print(err)
+		return
+	}
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:     "HDU Station",
 		Width:     1180,
 		Height:    780,
-		MinWidth:  760,
+		MinWidth:  380,
 		MinHeight: 560,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 245, G: 245, B: 240, A: 1},
+		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		Bind: []interface{}{

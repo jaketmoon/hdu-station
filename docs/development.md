@@ -1,41 +1,26 @@
-# Development workflow
+# 开发
 
-## Vertical slices
+需要 Go 1.25+、Node.js 20.19+ 和目标系统的 Wails 2 编译依赖。
 
-Implement one user-visible capability at a time:
-
-1. define the Go use case and boundary;
-2. add deterministic unit tests;
-3. bind it to Wails;
-4. implement loading, empty, error and success UI states;
-5. exercise the real local path where credentials and platform availability permit;
-6. commit the verified slice independently.
-
-## Credential handling
-
-- Real values live only in ignored `.env` or the product YAML file.
-- `.env` seeds a new Station configuration only. Once `config.yaml` exists,
-  change the campus PAT through Station settings; it deliberately does not
-  synchronize with hduhelp-cli's separate local configuration.
-- Tests use fake values and local HTTP servers.
-- Never place tokens in command arguments, snapshots, fixtures or logs.
-- Tencent credentials remain owned by the official CLI/keychain.
-- Tencent CLI downloads use the pinned platform package manifest in
-  `internal/tools/tencent_install.go`; update the version and every platform
-  integrity together from official npm metadata. The runtime must use only the
-  verified binary below the Station data root, never a same-named host-PATH
-  executable.
-
-## Reuse from hdu-mate
-
-Copy only files needed by the active slice. Preserve useful UI, Agent event and tool execution concepts, while removing HTTP server, tenant, ACL, Shared Runner, Kubernetes and database assumptions in the same commit.
-
-## Required checks
-
-```bash
+```sh
+make frontend-install
 make test
-make frontend-check
 make build
 ```
 
-Before a phase is declared complete, perform an independent code-quality and over-design review and resolve material findings.
+`frontend/src/api.ts` 是前端唯一的宿主边界。使用 `wails dev` 可运行完整桌面开发环境；单独 `npm run dev` 可查看界面，但真实问答只能由 Wails 提供，不会转到远端后端或返回演示数据。
+
+`make e2e` 使用已安装的 Google Chrome，在测试文件里注入 Wails 替身，检查 1280×820 与 390×844。截图写入 `frontend/test-results/`。单测覆盖中文输入法、对话切换、流式停止、配置保留、SQLite 恢复、SSE 截断和工具作用域。
+
+`make live-test` 是显式的真实联网验收；未设置 `HDU_STATION_LIVE_TEST=1` 时自动跳过。不要在日志、截图或测试失败信息中输出凭证。
+
+源码结构：
+
+- `app.go`：Wails 用例、单轮生命周期和取消。
+- `internal/agent`：Eino 循环和 DeepSeek SSE 适配。
+- `internal/tools`：固定只读 QQ 操作和现有完整性安装器。
+- `internal/skills`：简短选课提示与唯一的频道范围数据。
+- `internal/config` / `internal/storage`：私有 YAML 与本机对话历史。
+- `frontend/src`：聊天界面、设置、Markdown 渲染和绑定契约。
+
+没有通用 Agent、复杂证据账本、动态技能安装、Sandbox 或线上租户依赖。

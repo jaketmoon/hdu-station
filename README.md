@@ -1,51 +1,43 @@
-# HDU Station
+# HDU Station · 选课助手
 
-HDU Station 是安装在学生个人电脑上的本地校园 AI 工作站。它通过一个统一的对话入口连接校园能力、腾讯频道和公开网页，并在需要执行代码时自动进入 Station 自带的隔离环境。
+打开就能问选课问题：通识选修有什么水课、哪门课作业少、老师给分如何。助手读取杭电 QQ 频道讨论，使用 DeepSeek V4.1 Flash 给出自然回答，并附原帖链接。
 
-## 产品边界
+Go + Wails 2 · React + TypeScript · Eino · SQLite / YAML
 
-- 本地优先：配置、会话、缓存和工作区默认只保存在用户电脑。
-- 单一入口：用户不需要选择 Agent 或切换 Sandbox 模式。
-- 只读校园助手：首发只查询校园、课程和公开信息，不执行选课等业务写操作。
-- 自动隔离：自由 Shell、Python、Node 和模型生成代码永远不在宿主机执行。
-- 轻量安装：桌面主程序不内置 Linux 镜像，Sandbox 和工具包按需下载。
-- 可彻底清理：应用可以清除自己创建的配置、数据库、缓存、工作区和 Sandbox。
+## 运行
 
-## 首发平台
+```sh
+make frontend-install
+make build
+open "build/bin/HDU Station.app"
+```
 
-- Windows 10/11 x64
-- macOS 13+ arm64
+macOS 构建生成可直接打开的本地签名应用。它尚未做 Developer ID 公证，不作为公开发行包。Windows/Linux 的桌面构建需要 Wails 对应平台依赖。
 
-## 技术栈
+首次使用在助手设置填写模型地址与 API Key；QQ 复用本机腾讯频道 CLI 的登录。如未安装连接组件，可在设置中安装。选课助手不执行选课、发帖或账号写操作。
 
-- Wails 2 + Go
-- React + TypeScript + Vite
-- YAML 本地配置
-- SQLite 本地会话存储
-- macOS Virtualization.framework/vfkit Sandbox（vsock runtime）
-- Windows WSL2 专用发行版 Sandbox（关闭驱动挂载与 Windows interop）
+## 从原项目迁移连接
 
-## 模型与工具
+```sh
+go run ./cmd/import-config -from /path/to/old-project/.env
+```
 
-- OpenAI Chat Completions
-- OpenAI Responses API
-- Anthropic Messages API
-- HDUHelp Neo MCP（宿主侧 PAT、校园只读能力）
-- 腾讯频道 CLI（指定频道只读检索）
-- Web Search / Web Fetch
+仅迁移连接配置，模型改为 V4.1 Flash。已有新版配置不会覆盖。凭证保存到新版数据根目录，产品不会读取或打包 `.env`。
 
-模型支持 SSE 增量响应；桌面 UI 通过本地 Wails 事件逐字显示，工具调用仍会经过同一个有界的只读工具循环。
+## 验证
 
-选课相关规则由版本化的 `course-selection` Skill 提供。Skill 内的社区频道候选不会进入全局配置；“水课”“给分”等只作为腾讯频道社区信号，不会被 Station 当作校园事实。
+```sh
+make test
+make frontend-check
+make build
+make e2e
+make live-test
+```
 
-## 当前开发前置条件
+`make live-test` 会使用已配置模型和 QQ 身份，产生实际模型调用费用。三个问题覆盖轻松通识课、给分与考核、人文经典选修；结果位于本机数据目录的 `logs/acceptance.md`。
 
-开发版不会内置 Sandbox 镜像。要启用隔离执行，需要通过 `.env` 或本地配置提供平台匹配的 HTTPS 镜像 URL 和 SHA-256；正式发布还必须提供签名镜像及发布元数据。缺少这些信息时，Station 会显示不可用并拒绝执行，不会回退到宿主机。
+## 本机数据
 
-腾讯频道的课程 Skill 只允许其中三个已验证的杭电数字 guild ID；官方 CLI 登录凭据由腾讯 CLI 管理，Station 只注册频道内只读检索，不会猜测频道或调用任意频道。
+macOS：`~/Library/Application Support/HDU Station Course`。关闭应用后删除此目录可清除配置、历史、连接组件及测试报告；旧版 `HDU Station` 数据和 QQ 自身的登录不受影响。
 
-详细设计见 [docs/architecture.md](docs/architecture.md)，分阶段实施和验收证据见 [docs/roadmap.md](docs/roadmap.md)。
-
-## 开发状态
-
-项目正在从初始全栈服务模板逐步改造成桌面应用。每个阶段独立提交并附带验证，最终用户不需要预装 Docker、Python 或 Node。
+实现边界见 [架构](docs/architecture.md)，开发方式见 [开发说明](docs/development.md)。
