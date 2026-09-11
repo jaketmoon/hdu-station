@@ -31,6 +31,7 @@ const settings = {
   model: "deepseek-flash",
   hasAPIKey: true,
   qqStatus: "ready",
+  qqEnabled: true,
   dataRoot: "/test",
   zanao: {
     enabled: false,

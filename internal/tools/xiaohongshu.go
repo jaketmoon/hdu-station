@@ -1,8 +1,8 @@
 package tools
 
 // Uses the documented HTTP API of xpzouying/xiaohongshu-mcp (aad2a3d).
-// The local service owns its browser and login; Station invokes only these
-// three fixed read endpoints and never launches a process or discovers tools.
+// The local service owns its browser and cookies. The agent only has the three
+// read endpoints; login endpoints are invoked exclusively from desktop settings.
 import (
 	"context"
 	"encoding/json"
@@ -60,6 +60,9 @@ func (c *XiaohongshuClient) requestOnce(ctx context.Context, path string, input 
 		return errSourceUnavailable
 	}
 	method, body := http.MethodGet, ""
+	if path == "/api/v1/login/cookies" {
+		method = http.MethodDelete
+	}
 	headers := http.Header{}
 	if input != nil {
 		data, err := json.Marshal(input)

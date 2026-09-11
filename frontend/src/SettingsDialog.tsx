@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { api, errorText, type Settings } from "./api";
+import {
+  api,
+  errorText,
+  type Settings,
+  type LoginSource,
+  type SourceConnection,
+} from "./api";
 import { Icon } from "./Icon";
+import { SourceCard } from "./SourceCard";
 const labels: Record<string, string> = {
   ready: "已连接",
   not_installed: "尚未安装连接组件",
@@ -36,14 +43,6 @@ export function SettingsDialog({
   );
   const [zanaoToken, setZanaoToken] = useState("");
   const [clearZanaoToken, setClearZanaoToken] = useState(false);
-  const [xhsEnabled, setXhsEnabled] = useState(
-    settings?.xiaohongshu.enabled ?? false,
-  );
-  const [xhsURL, setXhsURL] = useState(
-    settings?.xiaohongshu.baseURL ?? "http://127.0.0.1:18060",
-  );
-  const [xhsToken, setXhsToken] = useState("");
-  const [clearXhsToken, setClearXhsToken] = useState(false);
   const initialized = useRef(settings !== null);
   useEffect(() => {
     if (!initialized.current && settings) {
@@ -51,8 +50,6 @@ export function SettingsDialog({
       setBaseURL(settings.baseURL);
       setZanaoEnabled(settings.zanao.enabled);
       setSchoolAlias(settings.zanao.schoolAlias);
-      setXhsEnabled(settings.xiaohongshu.enabled);
-      setXhsURL(settings.xiaohongshu.baseURL);
     }
   }, [settings]);
   const zanaoDirty =
@@ -60,11 +57,6 @@ export function SettingsDialog({
     schoolAlias !== settings?.zanao.schoolAlias ||
     !!zanaoToken ||
     clearZanaoToken;
-  const xhsDirty =
-    xhsEnabled !== settings?.xiaohongshu.enabled ||
-    xhsURL !== settings?.xiaohongshu.baseURL ||
-    !!xhsToken ||
-    clearXhsToken;
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
@@ -83,22 +75,13 @@ export function SettingsDialog({
           token: zanaoToken,
           clearToken: clearZanaoToken,
         },
-        xiaohongshu: {
-          enabled: xhsEnabled,
-          baseURL: xhsURL,
-          authToken: xhsToken,
-          clearAuthToken: clearXhsToken,
-        },
       });
       onSaved(saved);
       setBaseURL(saved.baseURL);
       setSchoolAlias(saved.zanao.schoolAlias);
-      setXhsURL(saved.xiaohongshu.baseURL);
       setKey("");
       setZanaoToken("");
-      setXhsToken("");
       setClearZanaoToken(false);
-      setClearXhsToken(false);
       setNotice("设置已保存，连接状态已更新。");
     } catch (error) {
       setError(errorText(error));
@@ -106,21 +89,21 @@ export function SettingsDialog({
       setSaving(false);
     }
   }
-  async function connect() {
-    setSaving(true);
-    setError("");
-    setNotice("");
-    try {
-      onSaved(
-        settings?.qqStatus === "not_installed"
-          ? await api.install()
-          : await api.settings(),
-      );
-    } catch (error) {
-      setError(errorText(error));
-    } finally {
-      setSaving(false);
-    }
+  const latest = useRef(settings);
+  latest.current = settings;
+  function updateSource(source: LoginSource, connection: SourceConnection) {
+    const value = latest.current;
+    if (!value) return;
+    const next =
+      source === "qq"
+        ? {
+            ...value,
+            qqEnabled: connection.enabled,
+            qqStatus: connection.status,
+          }
+        : { ...value, xiaohongshu: { ...value.xiaohongshu, ...connection } };
+    latest.current = next;
+    onSaved(next);
   }
   return (
     <dialog
@@ -189,33 +172,27 @@ export function SettingsDialog({
               required={!settings?.hasAPIKey}
             />
             <p className="field-help">凭证仅保存在这台电脑上。</p>
-            <div className="connection-row">
-              <div>
-                <strong>QQ 频道</strong>
-                <p>
-                  <span
-                    className={`status-dot ${settings?.qqStatus === "ready" ? "online" : ""}`}
-                  />
-                  {labels[settings?.qqStatus ?? "unavailable"]}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={connect}
-                disabled={saving}
-              >
-                {settings?.qqStatus === "not_installed"
-                  ? "安装连接组件"
-                  : "重新检查"}
-              </button>
-            </div>
-            {settings?.qqStatus === "logged_out" && (
-              <p className="field-help">
-                复用本机腾讯频道 CLI 登录。请在终端完成 QQ
-                扫码登录后，点击重新检查。
-              </p>
-            )}
+            <div className="sources-heading">搜索来源</div>
+            <SourceCard
+              source="qq"
+              name="QQ 频道"
+              connection={{
+                enabled: settings?.qqEnabled ?? true,
+                status: settings?.qqStatus ?? "unavailable",
+              }}
+              disabled={saving || !settings}
+              onChange={updateSource}
+            />
+            <SourceCard
+              source="xiaohongshu"
+              name="小红书"
+              connection={{
+                enabled: settings?.xiaohongshu.enabled ?? false,
+                status: settings?.xiaohongshu.status ?? "disabled",
+              }}
+              disabled={saving || !settings}
+              onChange={updateSource}
+            />
             <details className="source-settings">
               <summary>
                 <strong>赞哦校园集市</strong>
@@ -284,79 +261,6 @@ export function SettingsDialog({
               {settings?.zanao.status === "unavailable" && (
                 <p className="field-help">
                   请检查 Token 是否过期、学校别名是否正确，或稍后重试。
-                </p>
-              )}
-            </details>
-            <details className="source-settings">
-              <summary>
-                <strong>小红书</strong>
-                <span>
-                  {xhsDirty
-                    ? "保存后检查"
-                    : labels[settings?.xiaohongshu.status ?? "disabled"]}
-                </span>
-              </summary>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={xhsEnabled}
-                  onChange={(event) => setXhsEnabled(event.target.checked)}
-                />
-                启用小红书搜索
-              </label>
-              <p className="field-help">查找杭电相关笔记，阅读文字与评论。</p>
-              <label htmlFor="xhs-address">小红书本机服务地址</label>
-              <input
-                id="xhs-address"
-                type="url"
-                value={xhsURL}
-                onChange={(event) => setXhsURL(event.target.value)}
-                required={xhsEnabled}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="http://127.0.0.1:18060"
-              />
-              <label htmlFor="xhs-token">
-                服务访问 Token（可选）
-                {settings?.xiaohongshu.hasAuthToken && (
-                  <span className="field-note">已保存</span>
-                )}
-              </label>
-              <input
-                id="xhs-token"
-                type="password"
-                value={xhsToken}
-                onChange={(event) => setXhsToken(event.target.value)}
-                autoComplete="new-password"
-                placeholder={
-                  settings?.xiaohongshu.hasAuthToken
-                    ? "留空则保留现有 Token"
-                    : "仅在服务启用了访问鉴权时填写"
-                }
-              />
-              {settings?.xiaohongshu.hasAuthToken && (
-                <label className="check-label">
-                  <input
-                    type="checkbox"
-                    checked={clearXhsToken}
-                    onChange={(event) => setClearXhsToken(event.target.checked)}
-                  />
-                  清除已保存的服务 Token
-                </label>
-              )}
-              <p className="field-help">
-                先在本机运行
-                xiaohongshu-mcp，并通过配套登录工具扫码登录。填写服务根地址，无需加
-                /mcp。服务访问 Token 对应 AUTH_TOKEN，并非账号 Cookie。
-              </p>
-              {settings?.xiaohongshu.status === "logged_out" && (
-                <p className="field-help">
-                  服务已连接，账号尚未登录。请扫码登录后保存并检查。
-                </p>
-              )}
-              {settings?.xiaohongshu.status === "unavailable" && (
-                <p className="field-help">
-                  请确认本机服务正在运行、端口正确，浏览器已准备好。
                 </p>
               )}
             </details>

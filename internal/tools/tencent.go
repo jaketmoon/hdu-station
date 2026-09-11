@@ -71,13 +71,18 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 
-// Only fixed typed read operations reach this runner; there is no shell interpreter.
+// Only fixed read operations and settings-only login operations reach this
+// runner; there is no shell interpreter or model-supplied command.
 func (c *Client) command(ctx context.Context, args ...string) (json.RawMessage, error) {
 	binary := TencentCLIPathAt(c.root)
 	if binary == "" {
 		return nil, errors.New("QQ 频道连接组件尚未安装，请在设置中安装")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	timeout := 25 * time.Second
+	if len(args) == 2 && args[0] == "login" && args[1] == "poll-token" {
+		timeout = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, append(args, "--json")...)
 	var out, stderr limitedBuffer
@@ -90,7 +95,7 @@ func (c *Client) command(ctx context.Context, args ...string) (json.RawMessage, 
 	}
 	err := command.Run()
 	if ctx.Err() != nil {
-		return nil, errors.New("QQ 频道读取超时或已停止")
+		return nil, ctx.Err()
 	}
 	var envelope struct {
 		Success bool            `json:"success"`
@@ -106,7 +111,7 @@ func (c *Client) command(ctx context.Context, args ...string) (json.RawMessage, 
 		case strings.Contains(raw, "153") || strings.Contains(raw, "频率"):
 			return nil, errors.New("rate_limited")
 		case strings.Contains(raw, "8011") || strings.Contains(raw, "未登录"):
-			return nil, errors.New("QQ 登录已失效，请重新登录频道 CLI")
+			return nil, errors.New("QQ 登录已失效，请在设置中重新连接")
 		case strings.Contains(raw, "130000") || strings.Contains(raw, "20047"):
 			return nil, errors.New("当前账号无法读取这个频道，请检查是否已加入")
 		default:

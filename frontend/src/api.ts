@@ -12,6 +12,7 @@ export type Settings = {
   model: string;
   hasAPIKey: boolean;
   qqStatus: string;
+  qqEnabled: boolean;
   dataRoot: string;
   zanao: {
     enabled: boolean;
@@ -35,12 +36,20 @@ export type SettingsInput = {
     token: string;
     clearToken: boolean;
   };
-  xiaohongshu: {
+  xiaohongshu?: {
     enabled: boolean;
     baseURL: string;
     authToken: string;
     clearAuthToken: boolean;
   };
+};
+export type LoginSource = "qq" | "xiaohongshu";
+export type SourceConnection = { enabled: boolean; status: string };
+export type SourceLogin = {
+  id: string;
+  status: string;
+  image?: string;
+  expiresAt?: number;
 };
 export type TurnResult = {
   conversation: Conversation;
@@ -65,6 +74,15 @@ type Bindings = {
   GetSettings(): Promise<Settings>;
   SaveSettings(input: SettingsInput): Promise<Settings>;
   InstallQQ(): Promise<Settings>;
+  CheckSource(source: LoginSource): Promise<SourceConnection>;
+  SetSourceEnabled(
+    source: LoginSource,
+    enabled: boolean,
+  ): Promise<SourceConnection>;
+  BeginSourceLogin(source: LoginSource): Promise<SourceLogin>;
+  PollSourceLogin(id: string): Promise<SourceLogin>;
+  CancelSourceLogin(id: string): Promise<void>;
+  ClearSourceCredentials(source: LoginSource): Promise<SourceConnection>;
   OpenLink(url: string): Promise<void>;
   CopyText(text: string): Promise<void>;
 };
@@ -91,6 +109,14 @@ export const api = {
   settings: () => bindings().GetSettings(),
   save: (input: SettingsInput) => bindings().SaveSettings(input),
   install: () => bindings().InstallQQ(),
+  checkSource: (source: LoginSource) => bindings().CheckSource(source),
+  enableSource: (source: LoginSource, enabled: boolean) =>
+    bindings().SetSourceEnabled(source, enabled),
+  beginLogin: (source: LoginSource) => bindings().BeginSourceLogin(source),
+  pollLogin: (id: string) => bindings().PollSourceLogin(id),
+  cancelLogin: (id: string) => bindings().CancelSourceLogin(id),
+  clearSource: (source: LoginSource) =>
+    bindings().ClearSourceCredentials(source),
   open: (url: string) => bindings().OpenLink(url),
   copy: (text: string) => bindings().CopyText(text),
   subscribe: (handler: (event: TurnEvent) => void) =>

@@ -60,7 +60,7 @@ func TestXiaohongshuFailureCategoriesAndRetryLimit(t *testing.T) {
 		wantCalls int
 		message   string
 	}{
-		{"auth", 401, 1, "服务访问 Token 无效"},
+		{"auth", 401, 1, "连接验证失败"},
 		{"rate limit", 429, 1, "限流"},
 		{"invalid request", 400, 1, "数据格式无效"},
 		{"server failure", 500, 2, "服务处理请求失败"},

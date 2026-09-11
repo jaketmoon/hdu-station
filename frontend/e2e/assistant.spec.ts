@@ -1,8 +1,15 @@
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+const loginQR =
+  "data:image/png;base64," +
+  readFileSync(new URL("./fixtures/login-qr.png", import.meta.url)).toString(
+    "base64",
+  );
 
 test.beforeEach(async ({ page }) => {
   // Test-only Wails boundary. Production code contains no demo responses or HTTP backend.
-  await page.addInitScript(() => {
+  await page.addInitScript((loginQR) => {
     const state = {
       id: "",
       messages: [] as any[],
@@ -15,6 +22,7 @@ test.beforeEach(async ({ page }) => {
       model: "deepseek-flash",
       hasAPIKey: true,
       qqStatus: "ready",
+      qqEnabled: true,
       dataRoot: "/test",
       zanao: {
         enabled: false,
@@ -57,19 +65,59 @@ test.beforeEach(async ({ page }) => {
                 (!input.zanao.clearToken && settings.zanao.hasToken),
               status: input.zanao.enabled ? "ready" : "disabled",
             });
-            Object.assign(settings.xiaohongshu, {
-              enabled: input.xiaohongshu.enabled,
-              baseURL: input.xiaohongshu.baseURL,
-              hasAuthToken:
-                !!input.xiaohongshu.authToken ||
-                (!input.xiaohongshu.clearAuthToken &&
-                  settings.xiaohongshu.hasAuthToken),
-              status: input.xiaohongshu.enabled ? "logged_out" : "disabled",
-            });
             return {
               ...settings,
               zanao: { ...settings.zanao },
               xiaohongshu: { ...settings.xiaohongshu },
+            };
+          },
+          CheckSource: async (source: string) =>
+            source === "qq"
+              ? { enabled: settings.qqEnabled, status: settings.qqStatus }
+              : {
+                  enabled: settings.xiaohongshu.enabled,
+                  status: settings.xiaohongshu.status,
+                },
+          SetSourceEnabled: async (source: string, enabled: boolean) => {
+            if (source === "qq") {
+              settings.qqEnabled = enabled;
+              settings.qqStatus = enabled ? "ready" : "disabled";
+              return { enabled, status: settings.qqStatus };
+            }
+            settings.xiaohongshu.enabled = enabled;
+            settings.xiaohongshu.status = enabled ? "logged_out" : "disabled";
+            return { enabled, status: settings.xiaohongshu.status };
+          },
+          BeginSourceLogin: async (source: string) => ({
+            id: source + "-login",
+            status: "waiting",
+            // Valid test-only PNG; the production image comes from the login provider.
+            image: loginQR,
+            expiresAt: Date.now() + 240000,
+          }),
+          PollSourceLogin: async (id: string) => {
+            const scanned = (window as any).__loginScanned;
+            const source = id.startsWith("qq") ? "qq" : "xiaohongshu";
+            if (scanned) {
+              if (source === "qq") settings.qqStatus = "ready";
+              else settings.xiaohongshu.status = "ready";
+            }
+            return { id, status: scanned ? "ready" : "waiting" };
+          },
+          CancelSourceLogin: async () => {},
+          ClearSourceCredentials: async (source: string) => {
+            if (source === "qq") {
+              settings.qqStatus = settings.qqEnabled
+                ? "logged_out"
+                : "disabled";
+              return { enabled: settings.qqEnabled, status: settings.qqStatus };
+            }
+            settings.xiaohongshu.status = settings.xiaohongshu.enabled
+              ? "logged_out"
+              : "disabled";
+            return {
+              enabled: settings.xiaohongshu.enabled,
+              status: settings.xiaohongshu.status,
             };
           },
           InstallQQ: async () => settings,
@@ -136,7 +184,7 @@ test.beforeEach(async ({ page }) => {
         },
       },
     };
-  });
+  }, loginQR);
 });
 
 test("welcome, real controls and readable response fit the window", async ({
@@ -240,23 +288,17 @@ test("optional sources can be configured and checked in both window sizes", asyn
   await page.screenshot({
     path: `test-results/${testInfo.project.name}-zanao-settings.png`,
   });
-  await dialog.locator("summary").filter({ hasText: "小红书" }).click();
-  await page.getByRole("checkbox", { name: "启用小红书搜索" }).check();
-  await page.getByLabel("小红书本机服务地址").fill("http://127.0.0.1:18060");
+  const xhs = dialog.getByRole("region", { name: "小红书来源" });
+  await xhs.locator(".source-disclosure").click();
+  await xhs.getByRole("switch", { name: "启用小红书搜索" }).click();
   await page.getByRole("button", { name: "保存并检查" }).click();
-  await expect(page.getByRole("status")).toHaveText(
-    "设置已保存，连接状态已更新。",
-  );
+  await expect(page.getByText("设置已保存，连接状态已更新。")).toBeVisible();
   await expect(
     dialog.locator("summary").filter({ hasText: "赞哦校园集市" }),
   ).toContainText("已连接");
-  await expect(
-    dialog.locator("summary").filter({ hasText: "小红书" }),
-  ).toContainText("需要重新登录");
+  await expect(xhs.locator(".source-status")).toContainText("需要重新登录");
   await expect(page.locator("#zanao-token")).toHaveValue("");
-  await expect(
-    page.getByText("服务已连接，账号尚未登录。请扫码登录后保存并检查。"),
-  ).toBeVisible();
+  await expect(page.getByLabel("小红书本机服务地址")).toHaveCount(0);
   expect(
     await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
   ).toBeTruthy();
@@ -280,3 +322,58 @@ test("optional sources can be configured and checked in both window sizes", asyn
       .filter({ hasText: "赞哦校园集市" }),
   ).toContainText("已连接");
 });
+
+for (const source of ["QQ 频道", "小红书"]) {
+  test(`${source}: compact card, QR login, credential clearing and saved toggle`, async ({
+    page,
+  }, testInfo) => {
+    await page.goto("/");
+    await page.getByTitle("查看助手设置").click();
+    const card = page.getByRole("region", { name: `${source}来源` });
+    await expect(
+      card.getByRole("button", { name: `重新检查${source}` }),
+    ).toBeVisible();
+    await expect(card.getByRole("switch")).not.toBeVisible();
+    await card.locator(".source-disclosure").click();
+    const toggle = card.getByRole("switch");
+    if ((await toggle.getAttribute("aria-checked")) === "false")
+      await toggle.click();
+    await card.getByRole("button", { name: "重新连接", exact: true }).click();
+    const qr = card.getByRole("img", { name: `${source}登录二维码` });
+    await expect(qr).toBeVisible();
+    await expect(qr).toBeInViewport({ ratio: 1 });
+    await expect(
+      card.getByText("在手机上确认登录，凭证会自动保存。"),
+    ).toBeInViewport();
+    expect(
+      await qr.evaluate(
+        (img: HTMLImageElement) => img.complete && img.naturalWidth > 0,
+      ),
+    ).toBeTruthy();
+    expect(
+      await page
+        .getByRole("dialog")
+        .evaluate((el) => el.scrollWidth <= el.clientWidth),
+    ).toBeTruthy();
+    await page.screenshot({
+      path: `test-results/${testInfo.project.name}-${source === "QQ 频道" ? "qq" : "xhs"}-login.png`,
+    });
+    await page.evaluate(() => {
+      (window as any).__loginScanned = true;
+    });
+    await expect(card.getByRole("status")).toContainText("登录成功", {
+      timeout: 6000,
+    });
+    await expect(qr).not.toBeVisible();
+    await expect(card.locator(".source-status")).toHaveText("已连接");
+    await card.getByRole("button", { name: "清除登录凭证" }).click();
+    await expect(card.getByRole("status")).toContainText("登录凭证已清除");
+    await expect(card.locator(".source-status")).toHaveText("需要重新登录");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await page.keyboard.press("Escape");
+    await page.getByTitle("查看助手设置").click();
+    await expect(card.locator(".source-status")).toHaveText("未启用");
+    await expect(card.getByRole("switch")).not.toBeVisible();
+  });
+}

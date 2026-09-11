@@ -20,6 +20,7 @@ type Settings struct {
 	Model       string              `json:"model"`
 	HasAPIKey   bool                `json:"hasAPIKey"`
 	QQStatus    string              `json:"qqStatus"`
+	QQEnabled   bool                `json:"qqEnabled"`
 	DataRoot    string              `json:"dataRoot"`
 	Zanao       ZanaoSettings       `json:"zanao"`
 	Xiaohongshu XiaohongshuSettings `json:"xiaohongshu"`
@@ -75,6 +76,9 @@ type activeTurn struct {
 }
 type App struct {
 	mu          sync.Mutex
+	sourceMu    sync.Mutex
+	logins      map[string]*sourceLoginSession
+	sourceBusy  bool
 	ctx         context.Context
 	root        string
 	cfg         config.Config
@@ -138,6 +142,9 @@ func (a *App) startup(ctx context.Context) {
 }
 func (a *App) shutdown(context.Context) {
 	a.mu.Lock()
+	for _, login := range a.logins {
+		login.cancel()
+	}
 	turn := a.active
 	if turn != nil {
 		turn.cancel()
@@ -159,12 +166,19 @@ func (a *App) GetSettings() Settings {
 	ctx, cancel := context.WithTimeout(a.ctx, 25*time.Second)
 	defer cancel()
 	settings := Settings{BaseURL: c.Model.BaseURL, Model: c.Model.Name, HasAPIKey: c.Model.APIKey != "", DataRoot: a.root,
+		QQEnabled:   !c.Sources.QQ.Disabled,
 		Zanao:       ZanaoSettings{Enabled: c.Sources.Zanao.Enabled, SchoolAlias: c.Sources.Zanao.SchoolAlias, HasToken: c.Sources.Zanao.Token != ""},
 		Xiaohongshu: XiaohongshuSettings{Enabled: c.Sources.Xiaohongshu.Enabled, BaseURL: c.Sources.Xiaohongshu.BaseURL, HasAuthToken: c.Sources.Xiaohongshu.AuthToken != ""},
 	}
 	var checks sync.WaitGroup
 	checks.Add(3)
-	go func() { defer checks.Done(); settings.QQStatus = a.client.Status(ctx) }()
+	go func() {
+		defer checks.Done()
+		settings.QQStatus = "disabled"
+		if settings.QQEnabled {
+			settings.QQStatus = a.client.Status(ctx)
+		}
+	}()
 	go func() { defer checks.Done(); settings.Zanao.Status = tools.NewZanaoClient(c.Sources.Zanao).Status(ctx) }()
 	go func() {
 		defer checks.Done()
@@ -174,6 +188,8 @@ func (a *App) GetSettings() Settings {
 	return settings
 }
 func (a *App) SaveSettings(in SettingsInput) (Settings, error) {
+	a.sourceMu.Lock()
+	defer a.sourceMu.Unlock()
 	a.mu.Lock()
 	if a.active != nil {
 		a.mu.Unlock()
@@ -262,6 +278,10 @@ func (a *App) Chat(conversationID, question, requestID string) (TurnResult, erro
 		return TurnResult{}, errors.New("请求标识无效")
 	}
 	a.mu.Lock()
+	if a.sourceBusy {
+		a.mu.Unlock()
+		return TurnResult{}, errors.New("正在更新来源连接，请稍后再发送问题")
+	}
 	if a.active != nil {
 		a.mu.Unlock()
 		return TurnResult{}, errors.New("已有一个问题正在回答，请稍等或停止")

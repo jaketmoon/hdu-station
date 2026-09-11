@@ -14,9 +14,9 @@ open "build/bin/HDU Station.app"
 
 macOS 构建生成可直接打开的本地签名应用。它尚未做 Developer ID 公证，不作为公开发行包。Windows/Linux 的桌面构建需要 Wails 对应平台依赖。
 
-首次使用在助手设置填写模型地址与 API Key；QQ 复用本机腾讯频道 CLI 的登录。如未安装连接组件，可在设置中安装。选课助手不执行选课、发帖或账号写操作。
+首次使用在助手设置填写模型地址与 API Key；QQ 复用本机腾讯频道 CLI 的登录。展开来源后可切换启用、扫码重新连接、清除登录凭证；缺少 QQ 连接组件时会在重连时准备。选课助手不执行选课、发帖等业务写操作。
 
-赞哦需填写自己的 Token 和学校别名；小红书需先运行并登录本机 `xiaohongshu-mcp`，再在设置中启用。两项默认关闭，详细步骤见 [搜索来源配置](docs/search-sources.md)。
+赞哦需填写自己的 Token 和学校别名；小红书需先运行本机 `xiaohongshu-mcp`，再在设置中启用并扫码连接。两项默认关闭，详细步骤见 [搜索来源配置](docs/search-sources.md)。
 
 ## 从原项目迁移连接
 

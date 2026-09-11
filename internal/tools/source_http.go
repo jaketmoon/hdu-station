@@ -84,7 +84,7 @@ func sourceError(name string, err error) error {
 	}
 	if errors.Is(err, errSourceAuth) {
 		if name == "小红书" {
-			return errors.New("小红书服务访问 Token 无效，请在设置中检查")
+			return errors.New("小红书连接验证失败，请检查本机连接组件")
 		}
 		return errors.New(name + "认证失败，请在设置中检查凭证")
 	}

@@ -28,8 +28,14 @@ type Config struct {
 }
 
 type Sources struct {
+	QQ          QQ          `yaml:"qq"`
 	Zanao       Zanao       `yaml:"zanao"`
 	Xiaohongshu Xiaohongshu `yaml:"xiaohongshu"`
+}
+
+// Disabled keeps QQ enabled for existing configurations and zero-value callers.
+type QQ struct {
+	Disabled bool `yaml:"disabled"`
 }
 type Zanao struct {
 	Enabled     bool   `yaml:"enabled"`

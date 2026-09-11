@@ -66,12 +66,18 @@ func NewSession(c *Client, guilds []string, progress func(string), sources ...co
 }
 
 func (s *Session) SourceSummary() string {
-	names := []string{"QQ 频道（qq）"}
+	names := []string{}
+	if !s.sources.QQ.Disabled {
+		names = append(names, "QQ 频道（qq）")
+	}
 	if s.sources.Zanao.Enabled {
 		names = append(names, "赞哦（zanao）")
 	}
 	if s.sources.Xiaohongshu.Enabled {
 		names = append(names, "小红书（xiaohongshu）")
+	}
+	if len(names) == 0 {
+		return "本轮没有启用搜索来源，请用户在设置中启用来源。不要声称已经查询社区讨论。"
 	}
 	return "本轮已启用的搜索来源：" + strings.Join(names, "、") + "。未启用的来源需要用户在设置中配置；工具失败不等于没有讨论。"
 }
@@ -98,7 +104,7 @@ func (s *Session) Search(ctx context.Context, in SearchInput) (SearchResult, err
 		enabled  bool
 		search   func(context.Context, string) (SearchResult, error)
 	}{
-		{"qq", "QQ 频道", true, s.searchQQ},
+		{"qq", "QQ 频道", !s.sources.QQ.Disabled, s.searchQQ},
 		{"zanao", "赞哦", s.sources.Zanao.Enabled, s.zanao.Search},
 		{"xiaohongshu", "小红书", s.sources.Xiaohongshu.Enabled, s.xiaohongshu.Search},
 	} {
