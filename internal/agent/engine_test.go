@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,5 +31,56 @@ func TestFollowupKeepsPreviouslyReadCitationWithoutSearchingAgain(t *testing.T) 
 	}
 	if result.Reads != 0 || !strings.Contains(result.Text, "https://pd.qq.com/s/previous") || strings.Contains(result.Text, "未核实") {
 		t.Fatal("follow-up lost a previously verified citation")
+	}
+}
+
+func TestXiaohongshuSearchReadAndCitationThroughAgent(t *testing.T) {
+	const noteID = "66abcdef1234567890abcdef"
+	reads := 0
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reads++
+		switch r.URL.Path {
+		case "/api/v1/feeds/search":
+			fmt.Fprint(w, `{"success":true,"data":{"feeds":[{"id":"`+noteID+`","xsecToken":"signature-private-sentinel","modelType":"note","noteCard":{"displayTitle":"杭电选修"}}]}}`)
+		case "/api/v1/feeds/detail":
+			fmt.Fprint(w, `{"success":true,"data":{"data":{"note":{"noteId":"`+noteID+`","title":"杭电选修","desc":"考核交论文","user":{"userId":"author-private-sentinel"}},"comments":{"list":[],"hasMore":false}}}}`)
+		default:
+			t.Error("unexpected source operation")
+			w.WriteHeader(404)
+		}
+	}))
+	defer source.Close()
+	rounds := 0
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(request), "private-sentinel") {
+			t.Error("source credentials or author reached model")
+		}
+		var delta any
+		finish := "tool_calls"
+		switch rounds {
+		case 0:
+			if !strings.Contains(string(request), "小红书（xiaohongshu）") {
+				t.Error("configured source missing from agent prompt")
+			}
+			delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "search", "type": "function", "function": map[string]string{"name": "search_courses", "arguments": `{"query":"选修","source":"xiaohongshu"}`}}}}
+		case 1:
+			delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "read", "type": "function", "function": map[string]string{"name": "read_course_posts", "arguments": `{"posts":["post-1"]}`}}}}
+		default:
+			delta, finish = map[string]string{"content": "这门课有同学提到交论文。[原帖](post-1)"}, "stop"
+		}
+		rounds++
+		frame, _ := json.Marshal(map[string]any{"model": "deepseek-flash", "choices": []any{map[string]any{"delta": delta, "finish_reason": finish}}})
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n", frame)
+	}))
+	defer model.Close()
+	engine := Engine{Model: config.Model{BaseURL: model.URL, APIKey: "model-key", Name: "deepseek-flash"}, Client: tools.NewClient(t.TempDir()), Sources: config.Sources{Xiaohongshu: config.Xiaohongshu{Enabled: true, BaseURL: source.URL, AuthToken: "auth-private-sentinel"}}}
+	result, err := engine.Answer(context.Background(), []storage.Message{{Role: "user", State: "complete", Content: "小红书有什么杭电选修体验？"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rounds != 3 || reads != 2 || result.Searches != 1 || result.Reads != 1 || !strings.Contains(result.Text, "https://www.xiaohongshu.com/explore/"+noteID) || strings.Contains(result.Text, "private-sentinel") {
+		t.Fatal("agent source search/read/citation pipeline incomplete")
 	}
 }

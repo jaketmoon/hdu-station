@@ -1,0 +1,156 @@
+diff --git a/browser/browser_download.go b/browser/browser_download.go
+index 1d9173c..21c6edf 100644
+--- a/browser/browser_download.go
++++ b/browser/browser_download.go
+@@ -58,7 +58,14 @@ func platformAsset() (assetName, binName string, ok bool) {
+ 	return "", "", false
+ }
+ 
++// HDU Station local change (2026-09-11): keep browser data in the configured root.
+ func browserCacheDir() (string, error) {
++	if base := os.Getenv("XHS_BROWSER_CACHE_DIR"); base != "" {
++		if !filepath.IsAbs(base) {
++			return "", fmt.Errorf("browser cache must be an absolute path")
++		}
++		return filepath.Join(base, browserVersion), nil
++	}
+ 	base, err := os.UserCacheDir()
+ 	if err != nil {
+ 		return "", err
+diff --git a/xiaohongshu/search.go b/xiaohongshu/search.go
+index 7c22952..0b7bdb5 100644
+--- a/xiaohongshu/search.go
++++ b/xiaohongshu/search.go
+@@ -100,14 +100,15 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, filters ...Fi
+ 		return nil, err
+ 	}
+ 
+-	// 注意 .Context(ctx) 会替换掉 NewSearchAction 里设的 60s deadline，必须在其后重新 Timeout，
+-	// 否则搜索页不 stable 时 MustWaitStable/MustWait 会永久挂起（无 deadline 可依赖）。
++	// Keep the page deadline after binding the request context. Background
++	// analytics/DOM activity must not block already-loaded search results.
+ 	page := s.page.Context(ctx).Timeout(60 * time.Second)
+ 
+ 	searchURL := makeSearchURL(keyword)
+ 	page.MustNavigate(searchURL)
+-	page.MustWaitStable()
+-	page.MustWait(`() => window.__INITIAL_STATE__ !== undefined`)
++	if err := waitSearchData(page); err != nil {
++		return nil, err
++	}
+ 	humanize.Delay(ctx, humanize.AfterNavigate)
+ 
+ 	if len(pending) > 0 {
+@@ -165,6 +166,35 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, filters ...Fi
+ 	return onlyNotes(feeds), nil
+ }
+ 
++// HDU Station local change (2026-09-11): avoid unrelated page-idle timeouts.
++// waitSearchData waits for the search store, not whole-page network/DOM idle.
++// A successful empty result is ready; the initial loading [] is not.
++func waitSearchData(page *rod.Page) error {
++	const ready = `() => {
++  const unref = x => x && typeof x === 'object' ? (x.value !== undefined ? x.value : x._value) : x;
++  const search = window.__INITIAL_STATE__?.search;
++  if (!search) return false;
++  const feeds = unref(search.feeds);
++  const phase = unref(search.state);
++  if (phase === 'error') return true;
++  return Array.isArray(feeds) && (phase === 'success' || (phase === undefined && feeds.length > 0));
++ }`
++	if err := page.Wait(rod.Eval(ready)); err != nil {
++		return fmt.Errorf("等待搜索结果失败: %w", err)
++	}
++	state, err := page.Eval(`() => {
++  const s = window.__INITIAL_STATE__?.search?.state;
++  return s && typeof s === 'object' ? (s.value !== undefined ? s.value : s._value) : s;
++ }`)
++	if err != nil {
++		return fmt.Errorf("读取搜索状态失败: %w", err)
++	}
++	if state.Value.Str() == "error" {
++		return fmt.Errorf("搜索页加载失败，请稍后重试")
++	}
++	return nil
++}
++
+ // feedIDsJS 读当前结果集的 id 列表，用来判断数据有没有换一批。
+ const feedIDsJS = `() => {
+ 	const f = window.__INITIAL_STATE__?.search?.feeds;
+diff --git a/xiaohongshu/search_ready_test.go b/xiaohongshu/search_ready_test.go
+new file mode 100644
+index 0000000..4ca57d7
+--- /dev/null
++++ b/xiaohongshu/search_ready_test.go
+@@ -0,0 +1,71 @@
++package xiaohongshu
++
++import (
++	"context"
++	"errors"
++	"github.com/go-rod/rod"
++	"github.com/go-rod/rod/lib/launcher"
++	"net/url"
++	"os"
++	"testing"
++	"time"
++)
++
++// Local deterministic fixtures, never real account data or platform requests.
++func TestSearchDataReadiness(t *testing.T) {
++	bin := os.Getenv("XHS_TEST_BROWSER_BIN")
++	if bin == "" {
++		t.Skip("set XHS_TEST_BROWSER_BIN for local browser regression fixtures")
++	}
++	l := launcher.New().Bin(bin).Headless(true).UserDataDir(t.TempDir())
++	browser := rod.New().ControlURL(l.MustLaunch()).MustConnect()
++	defer l.Cleanup()
++	defer browser.Close()
++	newPage := func(t *testing.T, script string) *rod.Page {
++		t.Helper()
++		p := browser.MustPage("data:text/html," + url.PathEscape("<body><script>"+script+"</script></body>"))
++		t.Cleanup(func() { _ = p.Close() })
++		p.MustWaitLoad()
++		return p
++	}
++	t.Run("background DOM activity does not block ready results", func(t *testing.T) {
++		p := newPage(t, `window.__INITIAL_STATE__={search:{state:{value:'success'},feeds:{value:[{id:'fixture'}]}}}; setInterval(()=>document.body.textContent=String(Date.now()),10);`)
++		start := time.Now()
++		_ = p.Timeout(350 * time.Millisecond).WaitStable(50 * time.Millisecond)
++		if time.Since(start) < 300*time.Millisecond {
++			t.Fatal("fixture did not reproduce the old whole-page wait")
++		}
++		if err := waitSearchData(p.Timeout(time.Second)); err != nil {
++			t.Fatal("ready data blocked by unrelated DOM activity")
++		}
++	})
++	t.Run("initial empty array waits for finished search", func(t *testing.T) {
++		p := newPage(t, `window.__INITIAL_STATE__={search:{state:{value:'loading'},feeds:{value:[]}}};setTimeout(()=>{window.__INITIAL_STATE__.search.feeds.value=[{id:'fixture'}];window.__INITIAL_STATE__.search.state.value='success';},200);`)
++		if err := waitSearchData(p.Timeout(2 * time.Second)); err != nil {
++			t.Fatal(err)
++		}
++		if p.MustEval(`()=>window.__INITIAL_STATE__.search.feeds.value.length`).Int() != 1 {
++			t.Fatal("loading empty array was treated as finished")
++		}
++	})
++	t.Run("completed empty search returns", func(t *testing.T) {
++		p := newPage(t, `window.__INITIAL_STATE__={search:{state:{value:'success'},feeds:{value:[]}}};`)
++		if err := waitSearchData(p.Timeout(time.Second)); err != nil {
++			t.Fatal("completed empty result was not accepted")
++		}
++	})
++	t.Run("failed search is not an empty result", func(t *testing.T) {
++		p := newPage(t, `window.__INITIAL_STATE__={search:{state:{value:'error'},feeds:{value:[]}}};`)
++		if err := waitSearchData(p.Timeout(time.Second)); err == nil {
++			t.Fatal("failed search accepted")
++		}
++	})
++	t.Run("cancel loading search", func(t *testing.T) {
++		p := newPage(t, `window.__INITIAL_STATE__={search:{state:{value:'loading'},feeds:{value:[]}}};`)
++		ctx, cancel := context.WithCancel(context.Background())
++		cancel()
++		if err := waitSearchData(p.Context(ctx)); !errors.Is(err, context.Canceled) {
++			t.Fatal("cancellation was lost")
++		}
++	})
++}

@@ -16,6 +16,18 @@ test.beforeEach(async ({ page }) => {
       hasAPIKey: true,
       qqStatus: "ready",
       dataRoot: "/test",
+      zanao: {
+        enabled: false,
+        schoolAlias: "",
+        hasToken: false,
+        status: "disabled",
+      },
+      xiaohongshu: {
+        enabled: false,
+        baseURL: "http://127.0.0.1:18060",
+        hasAuthToken: false,
+        status: "disabled",
+      },
     };
     (window as any).runtime = {
       EventsOn: (_: string, callback: (event: any) => void) => {
@@ -32,7 +44,34 @@ test.beforeEach(async ({ page }) => {
             state.conversation ? [state.conversation] : [],
           GetMessages: async () => state.messages,
           GetSettings: async () => settings,
-          SaveSettings: async () => settings,
+          SaveSettings: async (input: any) => {
+            Object.assign(settings, {
+              baseURL: input.baseURL,
+              hasAPIKey: !!input.apiKey || settings.hasAPIKey,
+            });
+            Object.assign(settings.zanao, {
+              enabled: input.zanao.enabled,
+              schoolAlias: input.zanao.schoolAlias,
+              hasToken:
+                !!input.zanao.token ||
+                (!input.zanao.clearToken && settings.zanao.hasToken),
+              status: input.zanao.enabled ? "ready" : "disabled",
+            });
+            Object.assign(settings.xiaohongshu, {
+              enabled: input.xiaohongshu.enabled,
+              baseURL: input.xiaohongshu.baseURL,
+              hasAuthToken:
+                !!input.xiaohongshu.authToken ||
+                (!input.xiaohongshu.clearAuthToken &&
+                  settings.xiaohongshu.hasAuthToken),
+              status: input.xiaohongshu.enabled ? "logged_out" : "disabled",
+            });
+            return {
+              ...settings,
+              zanao: { ...settings.zanao },
+              xiaohongshu: { ...settings.xiaohongshu },
+            };
+          },
           InstallQQ: async () => settings,
           OpenLink: async () => {},
           CopyText: async () => {},
@@ -182,4 +221,62 @@ test("long streamed answers follow the latest text without moving the composer",
     .locator(".timeline")
     .evaluate((node) => node.scrollHeight - node.clientHeight - node.scrollTop);
   expect(remaining).toBeLessThan(5);
+});
+
+test("optional sources can be configured and checked in both window sizes", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/");
+  await page.getByTitle("查看助手设置").click();
+  const dialog = page.getByRole("dialog");
+  await dialog.locator("summary").filter({ hasText: "赞哦校园集市" }).click();
+  await page.getByRole("checkbox", { name: "启用赞哦搜索" }).check();
+  await page.getByLabel("学校别名", { exact: true }).fill("test-campus");
+  await page.locator("#zanao-token").fill("test-only-token");
+  await expect(
+    dialog.locator("summary").filter({ hasText: "赞哦校园集市" }),
+  ).toContainText("保存后检查");
+  await page.locator("#zanao-school").scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-zanao-settings.png`,
+  });
+  await dialog.locator("summary").filter({ hasText: "小红书" }).click();
+  await page.getByRole("checkbox", { name: "启用小红书搜索" }).check();
+  await page.getByLabel("小红书本机服务地址").fill("http://127.0.0.1:18060");
+  await page.getByRole("button", { name: "保存并检查" }).click();
+  await expect(page.getByRole("status")).toHaveText(
+    "设置已保存，连接状态已更新。",
+  );
+  await expect(
+    dialog.locator("summary").filter({ hasText: "赞哦校园集市" }),
+  ).toContainText("已连接");
+  await expect(
+    dialog.locator("summary").filter({ hasText: "小红书" }),
+  ).toContainText("需要重新登录");
+  await expect(page.locator("#zanao-token")).toHaveValue("");
+  await expect(
+    page.getByText("服务已连接，账号尚未登录。请扫码登录后保存并检查。"),
+  ).toBeVisible();
+  expect(
+    await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth),
+  ).toBeTruthy();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  await page
+    .getByRole("button", { name: "保存并检查" })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-xiaohongshu-settings.png`,
+  });
+  await page.keyboard.press("Escape");
+  await page.getByTitle("查看助手设置").click();
+  await expect(
+    page
+      .getByRole("dialog")
+      .locator("summary")
+      .filter({ hasText: "赞哦校园集市" }),
+  ).toContainText("已连接");
 });

@@ -13,6 +13,34 @@ export type Settings = {
   hasAPIKey: boolean;
   qqStatus: string;
   dataRoot: string;
+  zanao: {
+    enabled: boolean;
+    schoolAlias: string;
+    hasToken: boolean;
+    status: string;
+  };
+  xiaohongshu: {
+    enabled: boolean;
+    baseURL: string;
+    hasAuthToken: boolean;
+    status: string;
+  };
+};
+export type SettingsInput = {
+  baseURL: string;
+  apiKey: string;
+  zanao: {
+    enabled: boolean;
+    schoolAlias: string;
+    token: string;
+    clearToken: boolean;
+  };
+  xiaohongshu: {
+    enabled: boolean;
+    baseURL: string;
+    authToken: string;
+    clearAuthToken: boolean;
+  };
 };
 export type TurnResult = {
   conversation: Conversation;
@@ -35,7 +63,7 @@ type Bindings = {
   Cancel(requestId: string): Promise<void>;
   DeleteConversation(id: string): Promise<void>;
   GetSettings(): Promise<Settings>;
-  SaveSettings(input: { baseURL: string; apiKey: string }): Promise<Settings>;
+  SaveSettings(input: SettingsInput): Promise<Settings>;
   InstallQQ(): Promise<Settings>;
   OpenLink(url: string): Promise<void>;
   CopyText(text: string): Promise<void>;
@@ -61,8 +89,7 @@ export const api = {
   cancel: (id: string) => bindings().Cancel(id),
   remove: (id: string) => bindings().DeleteConversation(id),
   settings: () => bindings().GetSettings(),
-  save: (baseURL: string, apiKey: string) =>
-    bindings().SaveSettings({ baseURL, apiKey }),
+  save: (input: SettingsInput) => bindings().SaveSettings(input),
   install: () => bindings().InstallQQ(),
   open: (url: string) => bindings().OpenLink(url),
   copy: (text: string) => bindings().CopyText(text),

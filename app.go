@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -17,15 +16,43 @@ import (
 )
 
 type Settings struct {
-	BaseURL   string `json:"baseURL"`
-	Model     string `json:"model"`
-	HasAPIKey bool   `json:"hasAPIKey"`
-	QQStatus  string `json:"qqStatus"`
-	DataRoot  string `json:"dataRoot"`
+	BaseURL     string              `json:"baseURL"`
+	Model       string              `json:"model"`
+	HasAPIKey   bool                `json:"hasAPIKey"`
+	QQStatus    string              `json:"qqStatus"`
+	DataRoot    string              `json:"dataRoot"`
+	Zanao       ZanaoSettings       `json:"zanao"`
+	Xiaohongshu XiaohongshuSettings `json:"xiaohongshu"`
+}
+type ZanaoSettings struct {
+	Enabled     bool   `json:"enabled"`
+	SchoolAlias string `json:"schoolAlias"`
+	HasToken    bool   `json:"hasToken"`
+	Status      string `json:"status"`
+}
+type XiaohongshuSettings struct {
+	Enabled      bool   `json:"enabled"`
+	BaseURL      string `json:"baseURL"`
+	HasAuthToken bool   `json:"hasAuthToken"`
+	Status       string `json:"status"`
 }
 type SettingsInput struct {
-	BaseURL string `json:"baseURL"`
-	APIKey  string `json:"apiKey"`
+	BaseURL     string            `json:"baseURL"`
+	APIKey      string            `json:"apiKey"`
+	Zanao       *ZanaoInput       `json:"zanao,omitempty"`
+	Xiaohongshu *XiaohongshuInput `json:"xiaohongshu,omitempty"`
+}
+type ZanaoInput struct {
+	Enabled     bool   `json:"enabled"`
+	SchoolAlias string `json:"schoolAlias"`
+	Token       string `json:"token"`
+	ClearToken  bool   `json:"clearToken"`
+}
+type XiaohongshuInput struct {
+	Enabled        bool   `json:"enabled"`
+	BaseURL        string `json:"baseURL"`
+	AuthToken      string `json:"authToken"`
+	ClearAuthToken bool   `json:"clearAuthToken"`
 }
 type TurnEvent struct {
 	RequestID      string                `json:"requestId"`
@@ -47,23 +74,29 @@ type activeTurn struct {
 	done               chan struct{}
 }
 type App struct {
-	mu     sync.Mutex
-	ctx    context.Context
-	root   string
-	cfg    config.Config
-	store  *storage.Store
-	client *tools.Client
-	active *activeTurn
-	emit   func(TurnEvent)
-	answer func(context.Context, config.Model, []storage.Message, func(agent.Event)) (agent.Result, error)
+	mu          sync.Mutex
+	ctx         context.Context
+	root        string
+	cfg         config.Config
+	store       *storage.Store
+	client      *tools.Client
+	active      *activeTurn
+	sourceLinks map[string]string
+	emit        func(TurnEvent)
+	answer      func(context.Context, config.Model, []storage.Message, func(agent.Event)) (agent.Result, error)
 }
 
 func (a *App) OpenLink(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Host != "pd.qq.com" || u.User != nil {
-		return errors.New("只支持打开 QQ 频道的原帖链接")
+	if !tools.IsSourceURL(raw) {
+		return errors.New("只支持打开 QQ 频道或小红书的原帖链接")
 	}
-	wails.BrowserOpenURL(a.ctx, u.String())
+	a.mu.Lock()
+	address := a.sourceLinks[raw]
+	a.mu.Unlock()
+	if address == "" {
+		address = raw
+	}
+	wails.BrowserOpenURL(a.ctx, address)
 	return nil
 }
 
@@ -90,9 +123,12 @@ func createApplicationAt(root string) (*App, error) {
 	if err != nil {
 		return nil, errors.New("无法打开本机对话记录")
 	}
-	a := &App{ctx: context.Background(), root: root, cfg: cfg, store: store, client: tools.NewClient(root), emit: func(TurnEvent) {}}
+	a := &App{ctx: context.Background(), root: root, cfg: cfg, store: store, client: tools.NewClient(root), sourceLinks: map[string]string{}, emit: func(TurnEvent) {}}
 	a.answer = func(ctx context.Context, m config.Model, h []storage.Message, emit func(agent.Event)) (agent.Result, error) {
-		return (&agent.Engine{Model: m, Client: a.client}).Answer(ctx, h, emit)
+		a.mu.Lock()
+		sources := a.cfg.Sources
+		a.mu.Unlock()
+		return (&agent.Engine{Model: m, Client: a.client, Sources: sources}).Answer(ctx, h, emit)
 	}
 	return a, nil
 }
@@ -120,9 +156,22 @@ func (a *App) GetSettings() Settings {
 	a.mu.Lock()
 	c := a.cfg
 	a.mu.Unlock()
-	ctx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
+	ctx, cancel := context.WithTimeout(a.ctx, 25*time.Second)
 	defer cancel()
-	return Settings{BaseURL: c.Model.BaseURL, Model: c.Model.Name, HasAPIKey: c.Model.APIKey != "", QQStatus: a.client.Status(ctx), DataRoot: a.root}
+	settings := Settings{BaseURL: c.Model.BaseURL, Model: c.Model.Name, HasAPIKey: c.Model.APIKey != "", DataRoot: a.root,
+		Zanao:       ZanaoSettings{Enabled: c.Sources.Zanao.Enabled, SchoolAlias: c.Sources.Zanao.SchoolAlias, HasToken: c.Sources.Zanao.Token != ""},
+		Xiaohongshu: XiaohongshuSettings{Enabled: c.Sources.Xiaohongshu.Enabled, BaseURL: c.Sources.Xiaohongshu.BaseURL, HasAuthToken: c.Sources.Xiaohongshu.AuthToken != ""},
+	}
+	var checks sync.WaitGroup
+	checks.Add(3)
+	go func() { defer checks.Done(); settings.QQStatus = a.client.Status(ctx) }()
+	go func() { defer checks.Done(); settings.Zanao.Status = tools.NewZanaoClient(c.Sources.Zanao).Status(ctx) }()
+	go func() {
+		defer checks.Done()
+		settings.Xiaohongshu.Status = tools.NewXiaohongshuClient(c.Sources.Xiaohongshu, a.root).Status(ctx)
+	}()
+	checks.Wait()
+	return settings
 }
 func (a *App) SaveSettings(in SettingsInput) (Settings, error) {
 	a.mu.Lock()
@@ -134,6 +183,29 @@ func (a *App) SaveSettings(in SettingsInput) (Settings, error) {
 	next.Model.BaseURL = strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
 	if strings.TrimSpace(in.APIKey) != "" {
 		next.Model.APIKey = strings.TrimSpace(in.APIKey)
+	}
+	if in.Zanao != nil {
+		next.Sources.Zanao.Enabled = in.Zanao.Enabled
+		next.Sources.Zanao.SchoolAlias = strings.TrimSpace(in.Zanao.SchoolAlias)
+		if in.Zanao.ClearToken {
+			next.Sources.Zanao.Token = ""
+		}
+		if strings.TrimSpace(in.Zanao.Token) != "" {
+			next.Sources.Zanao.Token = strings.TrimSpace(in.Zanao.Token)
+		}
+	}
+	if in.Xiaohongshu != nil {
+		next.Sources.Xiaohongshu.Enabled = in.Xiaohongshu.Enabled
+		next.Sources.Xiaohongshu.BaseURL = strings.TrimRight(strings.TrimSpace(in.Xiaohongshu.BaseURL), "/")
+		if next.Sources.Xiaohongshu.BaseURL == "" {
+			next.Sources.Xiaohongshu.BaseURL = config.DefaultXiaohongshuURL
+		}
+		if in.Xiaohongshu.ClearAuthToken {
+			next.Sources.Xiaohongshu.AuthToken = ""
+		}
+		if strings.TrimSpace(in.Xiaohongshu.AuthToken) != "" {
+			next.Sources.Xiaohongshu.AuthToken = strings.TrimSpace(in.Xiaohongshu.AuthToken)
+		}
 	}
 	next.Model.Name = "deepseek-v4.1-flash"
 	if next.Model.BaseURL == "https://api.deepseek.com" || next.Model.BaseURL == "https://api.deepseek.com/v1" {
@@ -151,15 +223,16 @@ func (a *App) SaveSettings(in SettingsInput) (Settings, error) {
 }
 func (a *App) InstallQQ() (Settings, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.active != nil {
+		a.mu.Unlock()
 		return Settings{}, errors.New("请等当前回答结束后再安装连接组件")
 	}
 	_, err := tools.EnsureTencentCLI(a.ctx, a.root, runtime.GOOS, runtime.GOARCH, nil)
+	a.mu.Unlock()
 	if err != nil {
 		return Settings{}, errors.New("QQ 连接组件安装失败，请检查网络或平台支持")
 	}
-	return Settings{BaseURL: a.cfg.Model.BaseURL, Model: a.cfg.Model.Name, HasAPIKey: a.cfg.Model.APIKey != "", QQStatus: a.client.Status(a.ctx), DataRoot: a.root}, nil
+	return a.GetSettings(), nil
 }
 func (a *App) ListConversations() ([]storage.Conversation, error) {
 	return a.store.Conversations(a.ctx)
@@ -225,6 +298,13 @@ func (a *App) Chat(conversationID, question, requestID string) (TurnResult, erro
 		})
 	}
 	visible := TurnResult{Conversation: conversation}
+	a.mu.Lock()
+	for _, source := range result.Sources {
+		if tools.IsSourceURL(source.URL) {
+			a.sourceLinks[source.URL] = source.BrowserURL()
+		}
+	}
+	a.mu.Unlock()
 	switch {
 	case errors.Is(err, context.Canceled):
 		assistant.State = "cancelled"

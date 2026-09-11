@@ -896,6 +896,42 @@ button {
   color: #6b7e5e;
   margin: 17px 0 8px;
 }
+.settings-dialog fieldset {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.source-settings {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #e5ebde;
+}
+.source-settings summary {
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.source-settings summary strong {
+  font-weight: 500;
+}
+.source-settings summary span {
+  float: right;
+  font-size: 10px;
+  color: #748462;
+}
+.settings-dialog .check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.7;
+}
+.settings-dialog input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  accent-color: #327761;
+}
 .settings-dialog input {
   width: 100%;
   border: 1px solid #dce5d5;

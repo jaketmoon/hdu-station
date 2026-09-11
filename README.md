@@ -1,6 +1,6 @@
 # HDU Station · 选课助手
 
-打开就能问选课问题：通识选修有什么水课、哪门课作业少、老师给分如何。助手读取杭电 QQ 频道讨论，使用 DeepSeek V4.1 Flash 给出自然回答，并附原帖链接。
+打开就能问选课问题：通识选修有什么水课、哪门课作业少、老师给分如何。助手读取杭电 QQ 频道讨论，也可启用赞哦校园集市和小红书，使用 DeepSeek V4.1 Flash 给出自然回答，并附原帖链接或小程序帖子位置。
 
 Go + Wails 2 · React + TypeScript · Eino · SQLite / YAML
 
@@ -15,6 +15,8 @@ open "build/bin/HDU Station.app"
 macOS 构建生成可直接打开的本地签名应用。它尚未做 Developer ID 公证，不作为公开发行包。Windows/Linux 的桌面构建需要 Wails 对应平台依赖。
 
 首次使用在助手设置填写模型地址与 API Key；QQ 复用本机腾讯频道 CLI 的登录。如未安装连接组件，可在设置中安装。选课助手不执行选课、发帖或账号写操作。
+
+赞哦需填写自己的 Token 和学校别名；小红书需先运行并登录本机 `xiaohongshu-mcp`，再在设置中启用。两项默认关闭，详细步骤见 [搜索来源配置](docs/search-sources.md)。
 
 ## 从原项目迁移连接
 

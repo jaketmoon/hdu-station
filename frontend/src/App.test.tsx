@@ -32,6 +32,18 @@ const settings = {
   hasAPIKey: true,
   qqStatus: "ready",
   dataRoot: "/test",
+  zanao: {
+    enabled: false,
+    schoolAlias: "",
+    hasToken: false,
+    status: "disabled",
+  },
+  xiaohongshu: {
+    enabled: false,
+    baseURL: "http://127.0.0.1:18060",
+    hasAuthToken: false,
+    status: "disabled",
+  },
 };
 const message = (
   id: string,

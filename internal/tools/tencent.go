@@ -5,9 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -150,60 +148,8 @@ func waitFor(ctx context.Context, d time.Duration) error {
 	}
 }
 
-type Post struct {
-	ID                   string   `json:"id"`
-	Title                string   `json:"title"`
-	Date                 string   `json:"date,omitempty"`
-	Comments             int      `json:"commentCount"`
-	Content              string   `json:"content,omitempty"`
-	Discussion           []string `json:"discussion,omitempty"`
-	URL                  string   `json:"url,omitempty"`
-	Partial              bool     `json:"partial,omitempty"`
-	guild, feed, channel string
-}
-type SearchInput struct {
-	Query string `json:"query" jsonschema:"description=简短的课程名、老师名或选课关键词"`
-}
-type SearchResult struct {
-	Posts    []Post   `json:"posts"`
-	Warnings []string `json:"warnings,omitempty"`
-}
-type ReadInput struct {
-	Posts []string `json:"posts" jsonschema:"description=搜索结果中的帖子 id，一次最多六个"`
-}
-type ReadResult struct {
-	Posts    []Post   `json:"posts"`
-	Warnings []string `json:"warnings,omitempty"`
-}
-type Session struct {
-	client                 *Client
-	guilds                 []string
-	posts                  map[string]Post
-	reads                  map[string]Post
-	progress               func(string)
-	Calls, Searches, Reads int
-}
-
-func NewSession(c *Client, guilds []string, progress func(string)) *Session {
-	if progress == nil {
-		progress = func(string) {}
-	}
-	return &Session{client: c, guilds: guilds, posts: map[string]Post{}, reads: map[string]Post{}, progress: progress}
-}
-func (s *Session) Search(ctx context.Context, in SearchInput) (SearchResult, error) {
+func (s *Session) searchQQ(ctx context.Context, q string) (SearchResult, error) {
 	result := SearchResult{Posts: []Post{}}
-	q := strings.TrimSpace(in.Query)
-	if len([]rune(q)) < 2 || len([]rune(q)) > 60 || strings.HasPrefix(q, "-") || strings.ContainsAny(q, "\n\r\x00") {
-		result.Warnings = []string{"请使用 2–60 字的简短关键词"}
-		return result, nil
-	}
-	s.Calls++
-	s.Searches++
-	if s.Calls > 18 {
-		result.Warnings = []string{"本轮读取已足够，请根据已有资料回答"}
-		return result, nil
-	}
-	s.progress("正在找「" + q + "」的同学讨论…")
 	for _, guild := range s.guilds {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
@@ -232,148 +178,100 @@ func (s *Session) Search(ctx context.Context, in SearchInput) (SearchResult, err
 			if f.ID == "" || len(f.ID) > 256 {
 				continue
 			}
-			id := ""
-			for key, p := range s.posts {
-				if p.feed == f.ID && p.guild == guild {
-					id = key
-					break
-				}
-			}
-			if id == "" {
-				id = fmt.Sprintf("post-%d", len(s.posts)+1)
-			}
-			p := Post{ID: id, Title: trim(f.Title, 240), Date: trim(f.Date, 40), Comments: f.Comments, guild: guild, feed: f.ID}
-			s.posts[id] = p
+			p := Post{Source: "qq", Title: trim(f.Title, 240), Date: trim(f.Date, 40), Comments: f.Comments, guild: guild, feed: f.ID}
 			result.Posts = append(result.Posts, p)
 		}
 	}
 	return result, nil
 }
-func (s *Session) Read(ctx context.Context, in ReadInput) (ReadResult, error) {
-	result := ReadResult{Posts: []Post{}}
-	if len(in.Posts) < 1 || len(in.Posts) > 6 {
-		result.Warnings = []string{"一次请选择 1–6 个帖子"}
-		return result, nil
+func (s *Session) readQQ(ctx context.Context, p Post) (Post, []string, error) {
+	warnings := []string{}
+	data, err := s.client.read(ctx, s.progress, "feed", "get-feed-detail", "--guild-id", p.guild, "--feed-id", p.feed)
+	if err != nil {
+		return p, nil, err
 	}
-	s.Calls++
-	if s.Calls > 18 {
-		result.Warnings = []string{"本轮读取已足够，请根据已有资料回答"}
-		return result, nil
+	var raw struct {
+		Feed struct {
+			Title   string `json:"title"`
+			Content string `json:"content"`
+			Channel string `json:"channel_id"`
+			URL     string `json:"share_url"`
+			Date    string `json:"create_time"`
+		} `json:"feed"`
 	}
-	for _, id := range in.Posts {
-		if p, ok := s.reads[id]; ok {
-			result.Posts = append(result.Posts, p)
-			continue
+	if json.Unmarshal(data, &raw) != nil || raw.Feed.Content == "" {
+		return p, nil, errors.New("部分帖子正文无法读取")
+	}
+	p.Content = trim(raw.Feed.Content, 6500)
+	p.Partial = p.Content != raw.Feed.Content
+	p.channel = raw.Feed.Channel
+	p.URL = shareURL(raw.Feed.URL)
+	if raw.Feed.Title != "" {
+		p.Title = trim(raw.Feed.Title, 240)
+	}
+	if raw.Feed.Date != "" {
+		p.Date = trim(raw.Feed.Date, 40)
+	}
+	p.Discussion = []string{}
+	cursor := ""
+	for page := 0; page < 2; page++ {
+		args := []string{"feed", "get-feed-comments", "--guild-id", p.guild, "--feed-id", p.feed, "--count", "20", "--reply-list-num", "5"}
+		if p.channel != "" {
+			args = append(args, "--channel-id", p.channel)
 		}
-		if s.Reads >= 12 {
-			result.Warnings = append(result.Warnings, "本轮已读取 12 个帖子，请根据已有资料给出建议")
+		if cursor != "" {
+			args = append(args, "--attach-info", cursor)
+		}
+		data, err = s.client.read(ctx, s.progress, args...)
+		if err != nil {
+			p.Partial = true
+			warnings = append(warnings, err.Error())
 			break
 		}
-		p, ok := s.posts[id]
-		if !ok {
-			result.Warnings = append(result.Warnings, "帖子引用无效，请先搜索")
-			continue
-		}
-		s.progress("正在读「" + trim(p.Title, 30) + "」和评论…")
-		data, err := s.client.read(ctx, s.progress, "feed", "get-feed-detail", "--guild-id", p.guild, "--feed-id", p.feed)
-		if err != nil {
-			result.Warnings = append(result.Warnings, err.Error())
-			continue
-		}
-		var raw struct {
-			Feed struct {
-				Title   string `json:"title"`
-				Content string `json:"content"`
-				Channel string `json:"channel_id"`
-				URL     string `json:"share_url"`
-				Date    string `json:"create_time"`
-			} `json:"feed"`
-		}
-		if json.Unmarshal(data, &raw) != nil || raw.Feed.Content == "" {
-			result.Warnings = append(result.Warnings, "部分帖子正文无法读取")
-			continue
-		}
-		p.Content = trim(raw.Feed.Content, 6500)
-		p.Partial = p.Content != raw.Feed.Content
-		p.channel = raw.Feed.Channel
-		p.URL = shareURL(raw.Feed.URL)
-		if raw.Feed.Title != "" {
-			p.Title = trim(raw.Feed.Title, 240)
-		}
-		if raw.Feed.Date != "" {
-			p.Date = trim(raw.Feed.Date, 40)
-		}
-		p.Discussion = []string{}
-		cursor := ""
-		for page := 0; page < 2; page++ {
-			args := []string{"feed", "get-feed-comments", "--guild-id", p.guild, "--feed-id", p.feed, "--count", "20", "--reply-list-num", "5"}
-			if p.channel != "" {
-				args = append(args, "--channel-id", p.channel)
-			}
-			if cursor != "" {
-				args = append(args, "--attach-info", cursor)
-			}
-			data, err = s.client.read(ctx, s.progress, args...)
-			if err != nil {
-				p.Partial = true
-				result.Warnings = append(result.Warnings, err.Error())
-				break
-			}
-			var comments struct {
-				Items []struct {
+		var comments struct {
+			Items []struct {
+				Text    string          `json:"content_text"`
+				Content json.RawMessage `json:"content"`
+				More    bool            `json:"has_more_replies"`
+				Replies []struct {
 					Text    string          `json:"content_text"`
 					Content json.RawMessage `json:"content"`
-					More    bool            `json:"has_more_replies"`
-					Replies []struct {
-						Text    string          `json:"content_text"`
-						Content json.RawMessage `json:"content"`
-					} `json:"replies_preview"`
-				} `json:"comments"`
-				More   bool   `json:"has_more"`
-				Cursor string `json:"attach_info"`
-			}
-			if json.Unmarshal(data, &comments) != nil {
-				p.Partial = true
-				break
-			}
-			for _, c := range comments.Items {
-				if text := commentText(c.Text, c.Content); text != "" {
-					p.Discussion = append(p.Discussion, trim(text, 600))
-				}
-				for _, r := range c.Replies {
-					if text := commentText(r.Text, r.Content); text != "" {
-						p.Discussion = append(p.Discussion, "回复："+trim(text, 400))
-					}
-				}
-				if c.More {
-					p.Partial = true
-				}
-			}
-			if !comments.More {
-				break
-			}
-			cursor = comments.Cursor
-			if cursor == "" || page == 1 {
-				p.Partial = true
-				break
-			}
+				} `json:"replies_preview"`
+			} `json:"comments"`
+			More   bool   `json:"has_more"`
+			Cursor string `json:"attach_info"`
 		}
-		if len(p.Discussion) > 80 {
-			p.Discussion = p.Discussion[:80]
+		if json.Unmarshal(data, &comments) != nil {
 			p.Partial = true
+			break
 		}
-		s.reads[id] = p
-		s.Reads++
-		result.Posts = append(result.Posts, p)
+		for _, c := range comments.Items {
+			if text := commentText(c.Text, c.Content); text != "" {
+				p.Discussion = append(p.Discussion, trim(text, 600))
+			}
+			for _, r := range c.Replies {
+				if text := commentText(r.Text, r.Content); text != "" {
+					p.Discussion = append(p.Discussion, "回复："+trim(text, 400))
+				}
+			}
+			if c.More {
+				p.Partial = true
+			}
+		}
+		if !comments.More {
+			break
+		}
+		cursor = comments.Cursor
+		if cursor == "" || page == 1 {
+			p.Partial = true
+			break
+		}
 	}
-	return result, nil
-}
-func (s *Session) Sources() []Post {
-	p := []Post{}
-	for _, v := range s.reads {
-		p = append(p, v)
+	if len(p.Discussion) > 80 {
+		p.Discussion = p.Discussion[:80]
+		p.Partial = true
 	}
-	return p
+	return p, warnings, nil
 }
 func commentText(text string, raw json.RawMessage) string {
 	if text != "" {
@@ -389,11 +287,10 @@ func commentText(text string, raw json.RawMessage) string {
 	return c.Text
 }
 func shareURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Host != "pd.qq.com" || u.User != nil {
+	if !IsSourceURL(raw) || !strings.HasPrefix(raw, "https://pd.qq.com/") {
 		return ""
 	}
-	return u.String()
+	return raw
 }
 func trim(text string, limit int) string {
 	r := []rune(strings.TrimSpace(text))

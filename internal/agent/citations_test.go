@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/jaketmoon/hdu-station/internal/storage"
 	"github.com/jaketmoon/hdu-station/internal/tools"
 	"strings"
 	"testing"
@@ -26,6 +27,32 @@ func TestFragmentedReferencesBecomeReadSourceLinks(t *testing.T) {
 	stream.publish(resolveCitations(stream.raw, sources))
 	if visible != "推荐课（[原帖](https://pd.qq.com/s/source)），其他观点见 来源未核实。" {
 		t.Fatalf("citation result = %q", visible)
+	}
+}
+
+func TestMultiSourceCitationsAndHistoryExcludeSignatures(t *testing.T) {
+	url := "https://www.xiaohongshu.com/explore/66abcdef1234567890abcdef"
+	sources := []tools.Post{
+		{ID: "post-1", Source: "xiaohongshu", URL: url},
+		{ID: "post-2", Source: "zanao", Title: "课程讨论", Locator: "赞哦帖子 123（学校：test）"},
+	}
+	text := resolveCitations("[小红书](post-1)，[赞哦](post-2)，[编造](https://www.xiaohongshu.com/explore/66abcdef1234567890aaaaaa)。", sources)
+	if !strings.Contains(text, "[小红书]("+url+")") || !strings.Contains(text, sources[1].Locator) || strings.Contains(text, "66abcdef1234567890aaaaaa") || strings.Contains(text, "post-") {
+		t.Fatal("mixed source citations were not resolved")
+	}
+	if got := withSourceLinks("读到一些讨论。", sources[1:]); !strings.Contains(got, sources[1].Locator) || strings.Contains(got, "https://") {
+		t.Fatal("Zanao footer invented a permalink or lost the locator")
+	}
+	previous := previousSources([]storage.Message{{Role: "assistant", State: "complete", Content: "[来源](" + url + ")"}})
+	if len(previous) != 1 || !strings.Contains(resolveCitations(url, previous), url) {
+		t.Fatal("Xiaohongshu history lost verified source")
+	}
+	signed := url + "?xsec_token=private-sentinel"
+	if strings.Contains(resolveCitations("[签名]("+signed+") "+signed, sources), "private-sentinel") {
+		t.Fatal("unverified signed URL remained in answer")
+	}
+	if len(previousSources([]storage.Message{{Role: "assistant", State: "complete", Content: signed}})) != 0 {
+		t.Fatal("history accepted credentials in links")
 	}
 }
 

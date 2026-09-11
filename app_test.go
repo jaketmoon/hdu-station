@@ -85,3 +85,48 @@ func TestSettingsNeverReturnKeyAndBlankKeyKeepsExisting(t *testing.T) {
 		t.Fatal("blank key destroyed existing credential")
 	}
 }
+
+func TestSourceSettingsPreserveReplaceAndClearPrivateTokens(t *testing.T) {
+	a := testApp(t)
+	in := SettingsInput{BaseURL: "https://api.deepseek.com",
+		Zanao:       &ZanaoInput{SchoolAlias: "test", Token: "zanao-private-sentinel"},
+		Xiaohongshu: &XiaohongshuInput{BaseURL: "http://127.0.0.1:18060", AuthToken: "service-private-sentinel"},
+	}
+	settings, err := a.SaveSettings(in)
+	if err != nil || !settings.Zanao.HasToken || !settings.Xiaohongshu.HasAuthToken {
+		t.Fatal("source credentials not saved")
+	}
+	data, _ := json.Marshal(settings)
+	if strings.Contains(string(data), "private-sentinel") {
+		t.Fatal("source credentials returned to interface")
+	}
+	in.Zanao.Token, in.Xiaohongshu.AuthToken = "", ""
+	_, err = a.SaveSettings(in)
+	cfg, _ := config.Load(a.root)
+	if err != nil || cfg.Sources.Zanao.Token != "zanao-private-sentinel" || cfg.Sources.Xiaohongshu.AuthToken != "service-private-sentinel" {
+		t.Fatal("blank fields did not preserve source credentials")
+	}
+	_, err = a.SaveSettings(SettingsInput{BaseURL: in.BaseURL})
+	cfg, _ = config.Load(a.root)
+	if err != nil || cfg.Sources.Zanao.Token == "" {
+		t.Fatal("legacy caller removed source configuration")
+	}
+	in.Xiaohongshu.BaseURL = "https://remote.example:18060"
+	if _, err := a.SaveSettings(in); err == nil {
+		t.Fatal("remote service accepted")
+	}
+	cfg, _ = config.Load(a.root)
+	if cfg.Sources.Xiaohongshu.BaseURL != "http://127.0.0.1:18060" {
+		t.Fatal("failed save changed configuration")
+	}
+	in.Xiaohongshu.BaseURL = "http://127.0.0.1:18060"
+	in.Zanao.ClearToken, in.Xiaohongshu.ClearAuthToken = true, true
+	settings, err = a.SaveSettings(in)
+	if err != nil || settings.Zanao.HasToken || settings.Xiaohongshu.HasAuthToken {
+		t.Fatal("explicit clearing failed")
+	}
+	cfg, _ = config.Load(a.root)
+	if cfg.Sources.Zanao.Token != "" || cfg.Sources.Xiaohongshu.AuthToken != "" {
+		t.Fatal("cleared source credential persisted")
+	}
+}

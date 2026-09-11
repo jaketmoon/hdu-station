@@ -24,8 +24,9 @@ type Result struct {
 	Sources         []tools.Post
 }
 type Engine struct {
-	Model  config.Model
-	Client *tools.Client
+	Model   config.Model
+	Client  *tools.Client
+	Sources config.Sources
 }
 
 func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit func(Event)) (Result, error) {
@@ -38,8 +39,8 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 	defer cancel()
 	prompt, guilds := skills.CourseSelection()
-	session := tools.NewSession(e.Client, guilds, func(text string) { emit(Event{Kind: "status", Text: text}) })
-	search, err := utils.InferTool("search_courses", "搜索三个杭电频道中的课程讨论，返回标题和帖子 id。用简短关键词，选择相关帖子后读取正文与评论。", session.Search)
+	session := tools.NewSession(e.Client, guilds, func(text string) { emit(Event{Kind: "status", Text: text}) }, e.Sources)
+	search, err := utils.InferTool("search_courses", "在已启用的 QQ 频道、赞哦、小红书中搜索课程讨论，返回来源、标题和帖子 id。可指定 source；选择相关帖子后读取正文与评论。", session.Search)
 	if err != nil {
 		return Result{}, err
 	}
@@ -55,7 +56,7 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	if err != nil {
 		return Result{}, errors.New("无法启动选课助手")
 	}
-	input := []*schema.Message{schema.SystemMessage(prompt + "\n今天是 " + time.Now().Format("2006-01-02") + "。")}
+	input := []*schema.Message{schema.SystemMessage(prompt + "\n" + session.SourceSummary() + "\n今天是 " + time.Now().Format("2006-01-02") + "。")}
 	// Keep recent visible messages only. Tool payloads never persist between turns.
 	recent := []*schema.Message{}
 	used := 0

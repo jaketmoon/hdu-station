@@ -1,0 +1,2 @@
+# Unified diffs preserve a context space before existing tabs and blank lines.
+scripts/patches/*.patch -whitespace
