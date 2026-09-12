@@ -13,7 +13,7 @@ import (
 
 const AppDirectory = "HDU Station Course"
 
-var OwnedEntries = []string{"config.yaml", "station.db", "station.db-wal", "station.db-shm", "tools", "logs"}
+var OwnedEntries = []string{"config.yaml", "campus-auth.yaml", "station.db", "station.db-wal", "station.db-shm", "tools", "logs"}
 
 type Model struct {
 	BaseURL string `yaml:"base_url"`
@@ -114,7 +114,17 @@ func (c Config) Validate() error {
 	if len(c.Model.APIKey) > 4096 || strings.ContainsAny(c.Model.APIKey, "\r\n") {
 		return errors.New("API Key 格式不正确")
 	}
+	if err := ValidateCampusKey(c.CampusKey); err != nil {
+		return err
+	}
 	return c.Sources.Validate()
+}
+
+func ValidateCampusKey(key string) error {
+	if len(key) > 4096 || strings.ContainsAny(key, " \t\r\n\x00") {
+		return errors.New("校园 PAT 格式不正确，请填写完整的个人访问令牌")
+	}
+	return nil
 }
 func Load(root string) (Config, error) {
 	path := filepath.Join(root, "config.yaml")

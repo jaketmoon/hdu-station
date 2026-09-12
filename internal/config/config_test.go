@@ -75,3 +75,22 @@ func TestSourceConfigValidationAndLegacyDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestCampusPATValidationPreservesPreviousConfig(t *testing.T) {
+	root := t.TempDir()
+	cfg := Default()
+	cfg.CampusKey = "campus-private-sentinel"
+	if err := Save(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{"token\rheader", "token\nheader", "token\x00", "token header", "token\theader", strings.Repeat("x", 4097)} {
+		cfg.CampusKey = invalid
+		if err := Save(root, cfg); err == nil || strings.Contains(err.Error(), invalid) {
+			t.Fatal("invalid campus PAT accepted or reflected")
+		}
+		loaded, err := Load(root)
+		if err != nil || loaded.CampusKey != "campus-private-sentinel" {
+			t.Fatal("invalid PAT replaced the saved credential")
+		}
+	}
+}

@@ -39,7 +39,10 @@ func (c *XiaohongshuClient) request(ctx context.Context, path string, input any,
 		start := time.Now()
 		err := c.requestOnce(ctx, path, input, out)
 		recordXiaohongshuRequest(c.root, path, attempt, start, err)
-		if err == nil || ctx.Err() != nil || attempt == attempts ||
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err == nil || attempt == attempts ||
 			(!errors.Is(err, errSourceTimeout) && !errors.Is(err, errSourceServer)) {
 			return err
 		}

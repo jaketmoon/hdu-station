@@ -11,6 +11,7 @@ export type Settings = {
   baseURL: string;
   model: string;
   hasAPIKey: boolean;
+  campus: CampusConnection;
   qqStatus: string;
   qqEnabled: boolean;
   dataRoot: string;
@@ -44,6 +45,18 @@ export type SettingsInput = {
   };
 };
 export type LoginSource = "qq" | "xiaohongshu";
+export type CampusConnection = {
+  hasCredential: boolean;
+  status: string;
+  message?: string;
+};
+export type CampusLogin = {
+  id: string;
+  status: string;
+  userCode?: string;
+  expiresAt: number;
+  message?: string;
+};
 export type SourceConnection = { enabled: boolean; status: string };
 export type SourceLogin = {
   id: string;
@@ -73,6 +86,12 @@ type Bindings = {
   DeleteConversation(id: string): Promise<void>;
   GetSettings(): Promise<Settings>;
   SaveSettings(input: SettingsInput): Promise<Settings>;
+  CheckCampus(): Promise<CampusConnection>;
+  BeginCampusLogin(): Promise<CampusLogin>;
+  PollCampusLogin(id: string): Promise<CampusLogin>;
+  CancelCampusLogin(id: string): Promise<CampusLogin>;
+  OpenCampusLogin(id: string): Promise<void>;
+  LogoutCampus(): Promise<CampusConnection>;
   InstallQQ(): Promise<Settings>;
   CheckSource(source: LoginSource): Promise<SourceConnection>;
   SetSourceEnabled(
@@ -108,6 +127,12 @@ export const api = {
   remove: (id: string) => bindings().DeleteConversation(id),
   settings: () => bindings().GetSettings(),
   save: (input: SettingsInput) => bindings().SaveSettings(input),
+  checkCampus: () => bindings().CheckCampus(),
+  beginCampusLogin: () => bindings().BeginCampusLogin(),
+  pollCampusLogin: (id: string) => bindings().PollCampusLogin(id),
+  cancelCampusLogin: (id: string) => bindings().CancelCampusLogin(id),
+  openCampusLogin: (id: string) => bindings().OpenCampusLogin(id),
+  logoutCampus: () => bindings().LogoutCampus(),
   install: () => bindings().InstallQQ(),
   checkSource: (source: LoginSource) => bindings().CheckSource(source),
   enableSource: (source: LoginSource, enabled: boolean) =>

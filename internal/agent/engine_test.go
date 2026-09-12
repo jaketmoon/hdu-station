@@ -34,6 +34,41 @@ func TestFollowupKeepsPreviouslyReadCitationWithoutSearchingAgain(t *testing.T) 
 	}
 }
 
+func TestCourseCategoryFollowupOnlyExposesCommunityTools(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct{ Role, Content string }
+			Tools    []struct{ Function struct{ Name string } }
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		allowed := map[string]bool{"search_courses": true, "read_course_posts": true}
+		if len(request.Tools) != len(allowed) {
+			t.Error("retired campus tool is still registered")
+		}
+		for _, tool := range request.Tools {
+			if !allowed[tool.Function.Name] {
+				t.Error("agent exposed a tool outside the community read operations")
+			}
+		}
+		if len(request.Messages) == 0 || request.Messages[0].Role != "system" || !strings.Contains(request.Messages[0].Content, "当前未接入校园教务查询") {
+			t.Error("prompt still implies a campus login enables course classification")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"model\":\"test\",\"choices\":[{\"delta\":{\"content\":\"目前暂不支持核实课程类别，请以教务系统为准。\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+	}))
+	defer server.Close()
+	engine := Engine{Model: config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}}
+	result, err := engine.Answer(context.Background(), []storage.Message{
+		{Role: "assistant", State: "complete", Content: "之前查询过浙江传统文化。"},
+		{Role: "user", State: "complete", Content: "已登录校园账号，上面的课是什么类别？"},
+	}, nil)
+	if err != nil || result.Searches != 0 || result.Reads != 0 || !strings.Contains(result.Text, "暂不支持") {
+		t.Fatal("unavailable course query did not return through the normal answer path")
+	}
+}
+
 func TestXiaohongshuSearchReadAndCitationThroughAgent(t *testing.T) {
 	const noteID = "66abcdef1234567890abcdef"
 	reads := 0

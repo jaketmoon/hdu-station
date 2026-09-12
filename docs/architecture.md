@@ -24,7 +24,7 @@ QQ 默认启用并可关闭；赞哦和小红书是默认关闭的可选搜索�
 
 `internal/agent/provider.go` 实现 Eino ToolCallingChatModel。模型接口使用 Chat Completions SSE，禁止带凭证重定向，不把上游错误原文返回界面。正式 DeepSeek API 使用 `deepseek-flash`；迁移网关使用其目录中的 `deepseek-v4.1-flash`。实测网关返回模型名 `deepseek-flash`。
 
-只有一个内置 Skill：`internal/skills/course-selection/SKILL.md`。正文允许 Agent 自由选择关键词与自然回答形式，不要求 JSON、固定表格、课程数量或反复闭包检索。三个频道 ID 只保存在 Skill 的作用域区，加载后注入宿主工具，不发送给模型。
+只有一个内置 Skill：`internal/skills/course-selection/SKILL.md`。社区推荐允许 Agent 自由选择关键词与自然回答形式，不要求 JSON、固定表格、课程数量或反复闭包检索。三个频道 ID 只保存在 Skill 的作用域区，加载后注入宿主工具，不发送给模型。
 
 模型引用本轮帖子编号时，宿主将它解析成已读原帖链接；赞哦没有可核实的网页链接，转换为小程序帖子编号和学校别名。流式分片使用同一转换。追问可以沿用历史完整回答中已验证的 QQ/小红书链接；本轮读过帖子却没有引用时，在回答末尾补充来源，不要求固定回答结构。小红书链接的签名仅由宿主在内存中暂存，点击时补上，不进入模型或 SQLite。
 
@@ -47,13 +47,23 @@ QQ 和小红书使用同一个可展开来源卡片，折叠时只显示名称�
 
 前端只收到校验过的 PNG/JPEG data URL、会话 ID、过期时间和状态，不收到授权码或账号凭证。轮询串行执行，关闭设置、过期、切换登录会话时停止宿主轮询并忽略迟到响应；QQ 长轮询会取消并等待退出后再清除凭证。小红书上游的扫码浏览器由独立服务管理，在其二维码超时后关闭，关闭 Station 的等待界面本身不会撤销上游二维码。修改来源连接与正在进行的回答互斥，Agent 的来源列表和实际搜索都遵守启用开关。
 
+## 校园网页授权
+
+设置中的「HDU CLI 登录」供后续校园功能接入，当前不向 Agent 开放校园工具。`campus_settings.go` 只向设置页暴露发起、查看状态、重新打开授权页、取消和退出用例。`internal/campusauth` 复用官方 CLI 的 RFC 8628 Device Authorization Grant：固定 `client_id=hduhelp-cli`，设备名为 `HDU Station`，沿用现有登录的 `academic:course:read` 申请范围，不自动扩大权限，请求有效期 30 天，用户可在官方页面调整。直接调用固定 Neo HTTPS 接口，无需安装校园 CLI，也不使用共享 CLI 配置。
+
+授权请求发至 `POST /open-apis/auth/device-authorization`，宿主仅允许打开 `https://neo.hduhelp.com/account/tokens/authorize` 并校验 `user_code` 与本次请求一致。后台按服务器间隔（至少五秒）调用 `POST /open-apis/authen/access-token`；处理 pending、slow_down、拒绝和过期，临时失败延长等待，始终受授权有效期约束。界面轮询只读内存，不触发额外上游请求。设备码与 PAT 不进入前端、模型、日志或 SQLite；前端只收到本次授权码、内部会话 ID、期限及状态。令牌响应必须确实包含且仅包含课程读取权限，不能把缺失 scope 当成已经批准。
+
+关闭设置、取消、替换登录或退出应用会停止等待，并尝试取消远端设备请求；取消后迟到的令牌不会保存，若已领取则尝试自撤销。原授权在新的授权成功保存前继续保留；保存失败也会尝试撤销新令牌。登录状态只检查本机凭证是否存在及是否过期，不调用课程查询或其他业务接口验证连接。发起/退出与正在进行的回答互斥，等待网页授权时不能开始新回答。授权过期后引导重新授权，不使用原生会话的 refresh 接口。
+
+校园账户数据原子保存至 `campus-auth.yaml`，保留稳定设备 ID、实际批准 scope、期限和 PAT。清除先提交本机空凭证，再通过 `DELETE /cli/tokens/current` 撤销当前 Station 授权；远端失败不会恢复本机凭证。重新授权只在成功保存新 PAT 后撤销 Station 管理的旧 PAT。历史 `campus_key` 仅在尚无新授权文件时兼容读取，不会被自动远端撤销；完成网页授权或本机退出后不会回退到旧令牌。
+
 ## 本机数据与迁移
 
 新版使用独立应用数据根目录 `HDU Station Course`，避免覆盖旧版配置、数据库和技能。在 macOS 下为 `~/Library/Application Support/HDU Station Course`。开发或测试可显式设置 `HDU_STATION_DATA_ROOT`。
 
-清理清单：`config.yaml`、`station.db` 及 WAL/SHM、`tools/`、`logs/`。`config.OwnedEntries` 记录同一清单。关闭应用后删除此目录即可移除全部新版持久数据。QQ CLI 继续复用自己的系统凭证存储（`qq-cli` / `token`）和 `~/.qqcli/.env` 回退，旧版 `.openclaw/.env` 回退中的 QQ 项也兼容；该登录不随应用数据根目录的清理删除。设置里的「清除登录凭证」会显式删除这项共享 QQ 登录及待授权状态，只移除对应 dotenv 变量，保留其他工具的变量和系统凭证。外部 mcporter 管理的凭证需要在原工具退出登录。
+清理清单：`config.yaml`、`campus-auth.yaml`、`station.db` 及 WAL/SHM、`tools/`、`logs/`。`config.OwnedEntries` 记录同一清单。关闭应用后删除此目录即可移除全部新版持久数据。QQ CLI 继续复用自己的系统凭证存储（`qq-cli` / `token`）和 `~/.qqcli/.env` 回退，旧版 `.openclaw/.env` 回退中的 QQ 项也兼容；该登录不随应用数据根目录的清理删除。设置里的「清除登录凭证」会显式删除这项共享 QQ 登录及待授权状态，只移除对应 dotenv 变量，保留其他工具的变量和系统凭证。外部 mcporter 管理的凭证需要在原工具退出登录。
 
-模型 Key、迁移的校园 PAT、赞哦 Token 与可选的小红书服务 Token 保存在权限为 0600 的 YAML。新增来源配置向后兼容，旧配置加载后默认关闭新来源，不增加持久文件。PAT 暂存用于后续用户明确需要的功能，当前选课助手不使用。界面只知道凭证是否已配置，可显式清除来源凭证。SQLite 仅保存用户问题和可见回答，不保存原始工具内容。未来数据库/配置版本直接拒绝，不尝试降级覆盖。
+模型 Key、校园授权、赞哦 Token 与可选的小红书服务 Token 保存在权限为 0600 的 YAML。旧配置加载后默认关闭新的社区来源。设置页仅收到凭证是否存在、本机登录状态和授权流程状态。SQLite 只保存用户问题与可见回答；版本 3 移除旧课程分类缓存表及其索引，兼容版本 1 和 2 并保留对话记录，不新建课程缓存。未来数据库/配置/校园授权文件版本直接拒绝，不尝试降级覆盖。
 
 小红书服务、账号 Cookie 和浏览器缓存由用户独立管理，Station 通过回环 HTTP 调用它；设置中的扫码、重连和清除账号操作也由该服务执行，不直接读写 Cookie 文件。来源配置步骤和已核对的上游版本见 [搜索来源配置](search-sources.md)。赞哦请求头适配的 MIT 许可随源码和构建产物附带。
 

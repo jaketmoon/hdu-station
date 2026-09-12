@@ -21,6 +21,7 @@ test.beforeEach(async ({ page }) => {
       baseURL: "https://api.deepseek.com",
       model: "deepseek-flash",
       hasAPIKey: true,
+      campus: { hasCredential: false, status: "logged_out" },
       qqStatus: "ready",
       qqEnabled: true,
       dataRoot: "/test",
@@ -70,6 +71,32 @@ test.beforeEach(async ({ page }) => {
               zanao: { ...settings.zanao },
               xiaohongshu: { ...settings.xiaohongshu },
             };
+          },
+          CheckCampus: async () => ({ ...settings.campus }),
+          BeginCampusLogin: async () => ({
+            id: "campus-login",
+            status: "waiting",
+            userCode: "ABCD-EFGH",
+            expiresAt: Date.now() + 600000,
+          }),
+          PollCampusLogin: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            settings.campus = { hasCredential: true, status: "saved" };
+            return {
+              id: "campus-login",
+              status: "ready",
+              expiresAt: Date.now() + 600000,
+            };
+          },
+          OpenCampusLogin: async () => {},
+          CancelCampusLogin: async () => ({
+            id: "campus-login",
+            status: "cancelled",
+            expiresAt: 0,
+          }),
+          LogoutCampus: async () => {
+            settings.campus = { hasCredential: false, status: "logged_out" };
+            return { ...settings.campus };
           },
           CheckSource: async (source: string) =>
             source === "qq"
@@ -143,7 +170,7 @@ test.beforeEach(async ({ page }) => {
               updatedAt: new Date().toISOString(),
             };
             const user = {
-              id: "user-1",
+              id: `user-${state.messages.length + 1}`,
               conversationId: state.id,
               role: "user",
               content: question,
@@ -151,7 +178,7 @@ test.beforeEach(async ({ page }) => {
               createdAt: "",
             };
             const assistant = {
-              id: "assistant-1",
+              id: `assistant-${state.messages.length + 1}`,
               conversationId: state.id,
               role: "assistant",
               content: "",
@@ -159,10 +186,16 @@ test.beforeEach(async ({ page }) => {
               createdAt: "",
             };
             state.conversation = conversation;
-            state.messages = [user, assistant];
+            state.messages.push(user, assistant);
             emit({ kind: "start", conversation, user, assistant });
             emit({ kind: "status", text: "正在阅读同学讨论…" });
-            await new Promise((resolve) => setTimeout(resolve, 400));
+            if (question === "停止回答测试") {
+              // Keep the fixture in flight until Cancel, independent of how
+              // long the narrow layout takes to settle before Playwright clicks.
+              const deadline = Date.now() + 10000;
+              while (!state.stop && Date.now() < deadline)
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            } else await new Promise((resolve) => setTimeout(resolve, 400));
             let answer =
               "如果你更在意**作业少、考核轻松**，可以先看看下面这几门。\n\n### 可以优先了解\n\n| 课程 | 同学提到的体验 | 参考 |\n| --- | --- | --- |\n| 戏曲鉴赏 | 有同学提到期末以鉴赏作业为主，平时签到不多。不同学期要求可能有变化。 | [原帖](https://pd.qq.com/s/example1) |\n| 中国传统美学导论 | 有同学认可课堂氛围和给分，仍需要认真完成期末作业。 | [原帖](https://pd.qq.com/s/example2) |\n\n**选课前再确认两件事：**授课老师是否相同，以及本学期的考核安排。社区里的“水”是个人感受，不能保证每个人都拿高分。\n\n你更想要不用考试的，还是不用做小组作业的？";
             if (question === "长回答滚动测试")
@@ -185,6 +218,44 @@ test.beforeEach(async ({ page }) => {
       },
     };
   }, loginQR);
+});
+
+test("campus CLI login remains available without course lookup in both windows", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/");
+  await page.getByTitle("查看助手设置").click();
+  const dialog = page.getByRole("dialog");
+  const campus = dialog.locator(".campus-settings");
+  await campus.locator("summary").click();
+  await expect(campus.locator("summary")).toContainText("HDU CLI 登录");
+  await expect(campus.locator("summary")).toContainText("尚未登录");
+  await campus.getByRole("button", { name: "网页授权" }).click();
+  await expect(campus.getByText("ABCD-EFGH")).toBeVisible();
+  await campus
+    .getByRole("button", { name: "再次打开授权页" })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-campus-authorizing.png`,
+  });
+  await expect(campus.locator("summary")).toContainText("已登录");
+  await expect(campus).toContainText("当前仅保留登录，校园功能尚未接入。");
+  await expect(campus).not.toContainText("查询课程类别");
+  await campus.scrollIntoViewIfNeeded();
+  expect(
+    await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth),
+  ).toBeTruthy();
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-campus-settings.png`,
+  });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /想选点轻松的/ }).click();
+  await expect(page.getByRole("button", { name: "复制回答" })).toBeVisible();
+  await page.getByTitle("查看助手设置").click();
+  await campus.locator("summary").click();
+  await expect(campus.getByRole("button", { name: "重新授权" })).toBeVisible();
+  await campus.getByRole("button", { name: "退出登录" }).click();
+  await expect(campus.locator("summary")).toContainText("尚未登录");
 });
 
 test("welcome, real controls and readable response fit the window", async ({
@@ -239,11 +310,9 @@ test("stop completes promptly, and history is usable on narrow screens", async (
   page,
 }, testInfo) => {
   await page.goto("/");
-  await page
-    .getByRole("textbox", { name: "选课问题" })
-    .fill("给分高的通识选修有哪些？");
+  await page.getByRole("textbox", { name: "选课问题" }).fill("停止回答测试");
   await page.getByRole("button", { name: "发送问题" }).click();
-  await page.getByRole("button", { name: "停止回答" }).click();
+  await page.getByRole("button", { name: "停止回答", exact: true }).click();
   await expect(page.getByText("已停止回答，可以继续提问。")).toBeVisible();
   if (testInfo.project.name === "narrow")
     await page.getByRole("button", { name: "打开历史列表" }).click();

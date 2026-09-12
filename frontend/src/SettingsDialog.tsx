@@ -8,6 +8,7 @@ import {
 } from "./api";
 import { Icon } from "./Icon";
 import { SourceCard } from "./SourceCard";
+import { CampusCard } from "./CampusCard";
 const labels: Record<string, string> = {
   ready: "已连接",
   not_installed: "尚未安装连接组件",
@@ -172,6 +173,21 @@ export function SettingsDialog({
               required={!settings?.hasAPIKey}
             />
             <p className="field-help">凭证仅保存在这台电脑上。</p>
+            <CampusCard
+              connection={
+                settings?.campus ?? {
+                  hasCredential: false,
+                  status: "logged_out",
+                }
+              }
+              disabled={saving || !settings}
+              onChange={(campus) => {
+                if (!latest.current) return;
+                const next = { ...latest.current, campus };
+                latest.current = next;
+                onSaved(next);
+              }}
+            />
             <div className="sources-heading">搜索来源</div>
             <SourceCard
               source="qq"

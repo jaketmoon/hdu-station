@@ -1,5 +1,6 @@
 # Local configuration and secrets
 config.yaml
+campus-auth.yaml
 .env
 .env.*
 !.env.example

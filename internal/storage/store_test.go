@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
@@ -76,5 +77,59 @@ func TestFutureSchemaIsNotRewritten(t *testing.T) {
 	_ = db.QueryRow("PRAGMA user_version").Scan(&version)
 	if version != 99 {
 		t.Fatal("future database mutated")
+	}
+}
+
+func TestObsoleteCourseCacheIsRemovedWithoutLosingChats(t *testing.T) {
+	for _, priorVersion := range []int{1, 2} {
+		t.Run(fmt.Sprint(priorVersion), func(t *testing.T) {
+			root, ctx := t.TempDir(), context.Background()
+			s, err := Open(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name='course_type_cache'").Scan(&count); err != nil || count != 0 {
+				t.Fatal("new database created the retired course cache")
+			}
+			conversation, _, answer, err := s.Begin(ctx, "", "已有的对话")
+			if err != nil {
+				t.Fatal(err)
+			}
+			answer.Content, answer.State = "需要保留的回答", "complete"
+			if err := s.Finish(ctx, answer); err != nil {
+				t.Fatal(err)
+			}
+			if priorVersion == 2 {
+				_, err = s.db.Exec(`CREATE TABLE course_type_cache(cache_key TEXT PRIMARY KEY,payload BLOB NOT NULL,created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
+ CREATE INDEX course_type_cache_expiry ON course_type_cache(expires_at);
+ INSERT INTO course_type_cache VALUES ('old', '{}', 0, 1);`)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.db.Exec(fmt.Sprintf("PRAGMA user_version=%d", priorVersion)); err != nil {
+				t.Fatal(err)
+			}
+			s.Close()
+			for i := 0; i < 2; i++ {
+				s, err = Open(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				messages, err := s.Messages(ctx, conversation.ID)
+				if err != nil || len(messages) != 2 || messages[1].Content != answer.Content || messages[1].State != "complete" {
+					t.Fatal("course cache removal changed visible conversation history")
+				}
+				var version int
+				if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 3 {
+					t.Fatal("database did not advance to version 3")
+				}
+				if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('course_type_cache','course_type_cache_expiry')").Scan(&count); err != nil || count != 0 {
+					t.Fatal("obsolete course cache survived migration")
+				}
+				s.Close()
+			}
+		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jaketmoon/hdu-station/internal/agent"
+	"github.com/jaketmoon/hdu-station/internal/campusauth"
 	"github.com/jaketmoon/hdu-station/internal/config"
 	"github.com/jaketmoon/hdu-station/internal/storage"
 	"github.com/jaketmoon/hdu-station/internal/tools"
@@ -19,6 +20,7 @@ type Settings struct {
 	BaseURL     string              `json:"baseURL"`
 	Model       string              `json:"model"`
 	HasAPIKey   bool                `json:"hasAPIKey"`
+	Campus      CampusConnection    `json:"campus"`
 	QQStatus    string              `json:"qqStatus"`
 	QQEnabled   bool                `json:"qqEnabled"`
 	DataRoot    string              `json:"dataRoot"`
@@ -75,19 +77,21 @@ type activeTurn struct {
 	done               chan struct{}
 }
 type App struct {
-	mu          sync.Mutex
-	sourceMu    sync.Mutex
-	logins      map[string]*sourceLoginSession
-	sourceBusy  bool
-	ctx         context.Context
-	root        string
-	cfg         config.Config
-	store       *storage.Store
-	client      *tools.Client
-	active      *activeTurn
-	sourceLinks map[string]string
-	emit        func(TurnEvent)
-	answer      func(context.Context, config.Model, []storage.Message, func(agent.Event)) (agent.Result, error)
+	mu                sync.Mutex
+	sourceMu          sync.Mutex
+	logins            map[string]*sourceLoginSession
+	sourceBusy        bool
+	ctx               context.Context
+	root              string
+	cfg               config.Config
+	store             *storage.Store
+	client            *tools.Client
+	campus            *campusauth.Client
+	openCampusBrowser func(string) error
+	active            *activeTurn
+	sourceLinks       map[string]string
+	emit              func(TurnEvent)
+	answer            func(context.Context, config.Model, []storage.Message, func(agent.Event)) (agent.Result, error)
 }
 
 func (a *App) OpenLink(raw string) error {
@@ -123,11 +127,22 @@ func createApplicationAt(root string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	campus, err := campusauth.New(root, cfg.CampusKey)
+	if err != nil {
+		return nil, err
+	}
 	store, err := storage.Open(root)
 	if err != nil {
 		return nil, errors.New("无法打开本机对话记录")
 	}
-	a := &App{ctx: context.Background(), root: root, cfg: cfg, store: store, client: tools.NewClient(root), sourceLinks: map[string]string{}, emit: func(TurnEvent) {}}
+	a := &App{ctx: context.Background(), root: root, cfg: cfg, store: store, client: tools.NewClient(root), campus: campus, sourceLinks: map[string]string{}, emit: func(TurnEvent) {}}
+	a.openCampusBrowser = func(address string) error {
+		if !campusauth.Supported(runtime.GOOS) {
+			return errors.New("当前平台暂不支持校园网页授权")
+		}
+		wails.BrowserOpenURL(a.ctx, address)
+		return nil
+	}
 	a.answer = func(ctx context.Context, m config.Model, h []storage.Message, emit func(agent.Event)) (agent.Result, error) {
 		a.mu.Lock()
 		sources := a.cfg.Sources
@@ -141,6 +156,7 @@ func (a *App) startup(ctx context.Context) {
 	a.emit = func(e TurnEvent) { wails.EventsEmit(ctx, "course:turn", e) }
 }
 func (a *App) shutdown(context.Context) {
+	a.campus.Close()
 	a.mu.Lock()
 	for _, login := range a.logins {
 		login.cancel()
@@ -171,6 +187,7 @@ func (a *App) GetSettings() Settings {
 		Xiaohongshu: XiaohongshuSettings{Enabled: c.Sources.Xiaohongshu.Enabled, BaseURL: c.Sources.Xiaohongshu.BaseURL, HasAuthToken: c.Sources.Xiaohongshu.AuthToken != ""},
 	}
 	var checks sync.WaitGroup
+	settings.Campus = a.campusConnection()
 	checks.Add(3)
 	go func() {
 		defer checks.Done()
@@ -281,6 +298,10 @@ func (a *App) Chat(conversationID, question, requestID string) (TurnResult, erro
 	if a.sourceBusy {
 		a.mu.Unlock()
 		return TurnResult{}, errors.New("正在更新来源连接，请稍后再发送问题")
+	}
+	if a.campus.Pending() {
+		a.mu.Unlock()
+		return TurnResult{}, errors.New("请先完成或取消校园网页授权")
 	}
 	if a.active != nil {
 		a.mu.Unlock()

@@ -49,14 +49,15 @@ func Open(root string) (*Store, error) {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fail(err)
 	}
-	if version > 1 {
+	if version > 3 {
 		return fail(errors.New("对话数据库版本较新，请升级应用"))
 	}
 	_, err = db.Exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,updated_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,role TEXT NOT NULL,content TEXT NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS message_conversation ON messages(conversation_id,seq);
- PRAGMA user_version=1;
+ DROP TABLE IF EXISTS course_type_cache;
+ PRAGMA user_version=3;
  UPDATE messages SET state='interrupted' WHERE state='streaming';`)
 	if err != nil {
 		return fail(err)

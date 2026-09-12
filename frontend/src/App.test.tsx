@@ -30,6 +30,7 @@ const settings = {
   baseURL: "https://api.deepseek.com",
   model: "deepseek-flash",
   hasAPIKey: true,
+  campus: { hasCredential: false, status: "logged_out" },
   qqStatus: "ready",
   qqEnabled: true,
   dataRoot: "/test",

@@ -82,3 +82,11 @@ func TestPostIDsUsedAsLinkLabelsAreNotNested(t *testing.T) {
 		t.Fatalf("nested Markdown link: %s", text)
 	}
 }
+
+func TestMismatchedReferenceClosingBracketDoesNotProduceNestedLinks(t *testing.T) {
+	sources := []tools.Post{{ID: "post-12", URL: "https://pd.qq.com/s/source"}}
+	got := resolveCitations("婚姻家庭继承法：[原帖](post-12]。", sources)
+	if got != "婚姻家庭继承法：[原帖](https://pd.qq.com/s/source)。" {
+		t.Fatalf("broken reference became nested Markdown: %s", got)
+	}
+}

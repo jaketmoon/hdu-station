@@ -10,7 +10,7 @@ import (
 
 var postReference = regexp.MustCompile(`\bpost-[0-9]+\b`)
 var incompleteReference = regexp.MustCompile(`(?:\b(?:p|po|pos|post|post-|post-[0-9]+)|https?://[^\s\])>，。；！？、]*)$`)
-var referenceLink = regexp.MustCompile(`\[([^\]\n]+)\]\((post-[0-9]+)\)`)
+var referenceLink = regexp.MustCompile(`\[([^\]\n]+)\]\((post-[0-9]+)[)\]]`)
 var sourceLink = regexp.MustCompile(`https?://[^\s\])>，。；！？、<"“”]+`)
 var markdownSourceLink = regexp.MustCompile(`\[([^\]\n]+)\]\((https?://[^\s)]+)\)`)
 
