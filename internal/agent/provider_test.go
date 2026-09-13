@@ -2,14 +2,63 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jaketmoon/hdu-station/internal/config"
+	"github.com/jaketmoon/hdu-station/internal/tools"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestPendingCampusSelectionUsesBoundToolChoiceWithinBudget(t *testing.T) {
+	for _, tc := range []struct {
+		required string
+		round    int
+		force    bool
+	}{
+		{"fit_courses_to_schedule", 0, true}, {"", 0, false}, {"unregistered", 0, false}, {"fit_courses_to_schedule", 6, false},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]json.RawMessage
+			if json.NewDecoder(r.Body).Decode(&body) != nil {
+				t.Error("invalid model payload")
+			}
+			var choice struct {
+				Type     string
+				Function struct{ Name string }
+			}
+			_ = json.Unmarshal(body["tool_choice"], &choice)
+			if tc.force && (choice.Type != "function" || choice.Function.Name != "fit_courses_to_schedule") {
+				t.Error("pending selection was allowed to skip confirmation")
+			}
+			if !tc.force && len(body["tool_choice"]) > 0 {
+				t.Error("forced an unavailable or budget-exhausted tool")
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"已处理\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+		}))
+		p := NewProvider(config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}, nil)
+		p.state.round = tc.round
+		p.requiredTool = func() string { return tc.required }
+		tool, err := utils.InferTool("fit_courses_to_schedule", "test", tools.NewCampusSession(nil, nil).FitCourses)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := tool.Info(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.tools = []*schema.ToolInfo{info}
+		if _, err = p.Generate(context.Background(), []*schema.Message{schema.UserMessage("检查候选")}); err != nil {
+			t.Fatal(err)
+		}
+		server.Close()
+	}
+}
 
 func TestStreamToolCallsAndText(t *testing.T) {
 	events := []Event{}
@@ -68,5 +117,62 @@ func TestCredentialErrorsAreSafeAndRedirectsAreBlocked(t *testing.T) {
 	}
 	if leaked {
 		t.Fatal("credentials followed redirect")
+	}
+}
+
+func TestFirstStepRecoveryRequiresOneToolOnlyWhenSearchIsAvailable(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		search, previousResult bool
+		round                  int
+		wantRequired           int
+	}{
+		{"fresh recommendation", true, false, 0, 1},
+		{"previous empty search", true, true, 0, 0},
+		{"unclear official-only candidate", false, false, 0, 0},
+		{"last allowed round", true, false, 5, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			required := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				if string(body["tool_choice"]) == `"required"` {
+					required++
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"正在准备\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+			}))
+			defer server.Close()
+			p := NewProvider(config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}, nil)
+			p.state.round = tc.round
+			p.completionGap = func() string { return "需要具体候选与核实结果" }
+			name := "check_course_offerings"
+			if tc.search {
+				name = "search_courses"
+			}
+			operation, err := utils.InferTool(name, "test", func(context.Context, struct{}) (string, error) { return "", nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := operation.Info(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.tools = []*schema.ToolInfo{info}
+			input := []*schema.Message{schema.UserMessage("周三下午忙，剩下能塞点啥，别太累。")}
+			if tc.previousResult {
+				input = append(input, &schema.Message{Role: schema.Tool, Content: "没有结果", ToolCallID: "previous"})
+			}
+			if _, err := p.Generate(context.Background(), input); err != nil {
+				t.Fatal(err)
+			}
+			if required != tc.wantRequired {
+				t.Fatalf("required requests=%d, want=%d", required, tc.wantRequired)
+			}
+		})
 	}
 }

@@ -1,6 +1,6 @@
 // Package campusauth uses the official hduhelp-cli Device Authorization Grant.
 // Contract: hduhelp/hduhelp-neo@ba988e2, cmd/hduhelp-cli/auth.go and
-// docs/hduhelp-cli.md. Only academic:course:read is requested.
+// docs/hduhelp-cli.md. Only course and personal schedule reads are requested.
 package campusauth
 
 import (
@@ -17,12 +17,15 @@ import (
 )
 
 const CourseScope = "academic:course:read"
+const ScheduleScope = "academic:schedule:read"
+const requestedScope = CourseScope + " " + ScheduleScope
 
 var (
 	ErrLoginRequired = errors.New("校园授权无效或已过期，请在助手设置中重新授权")
 	ErrUnavailable   = errors.New("校园授权服务暂时无法连接，请稍后重试")
 	ErrStorage       = errors.New("无法保存校园授权，请检查应用数据目录后重试")
 	ErrResponse      = errors.New("校园授权服务返回无效响应，请重新授权")
+	ErrScope         = errors.New("缺少所需校园读取权限，请在助手设置的 HDU CLI 登录中重新授权课程信息和本人课表")
 )
 
 type credentials struct {
@@ -130,6 +133,9 @@ func (c *Client) Status() string {
 }
 
 func (c *Client) AccessToken(ctx context.Context) (string, error) {
+	if c == nil {
+		return "", ErrLoginRequired
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -139,6 +145,40 @@ func (c *Client) AccessToken(ctx context.Context) (string, error) {
 		return "", ErrLoginRequired
 	}
 	return c.credentials.Token, nil
+}
+
+// Permission metadata is safe for settings; credentials never cross Wails.
+func (c *Client) HasScope(scope string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, approved := range c.credentials.Scopes {
+		if approved == scope {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) AccessTokenFor(ctx context.Context, scope string) (string, error) {
+	token, err := c.AccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	if c.HasScope(scope) {
+		return token, nil
+	}
+	// Old manually imported PATs have unknown scopes. Preserve course reads;
+	// personal schedule access requires an explicitly recorded grant.
+	c.mu.Lock()
+	legacyCourse := !c.credentials.Managed && len(c.credentials.Scopes) == 0 && scope == CourseScope
+	c.mu.Unlock()
+	if legacyCourse {
+		return token, nil
+	}
+	return "", ErrScope
 }
 
 func (c *Client) Logout(ctx context.Context) (string, error) {

@@ -81,6 +81,7 @@ it("opens official web authorization and shows the saved local login without a P
   expect(screen.queryByLabelText(/校园 PAT/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "网页授权" }));
   expect(await screen.findByText("ABCD-EFGH")).toBeVisible();
+  expect(screen.getByText(/仅申请课程信息与本人课表读取权限/)).toBeVisible();
   expect(screen.getByRole("button", { name: "网页授权" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "再次打开授权页" }));
   await waitFor(() =>
@@ -97,6 +98,22 @@ it("opens official web authorization and shows the saved local login without a P
   );
   expect(screen.getByText("HDU CLI 登录已保存。")).toBeVisible();
   expect(api.save).not.toHaveBeenCalled();
+});
+
+it("explains the schedule permission upgrade for an existing course login", () => {
+  render(
+    <SettingsDialog
+      settings={{
+        ...settings,
+        campus: { hasCredential: true, status: "saved", scheduleAccess: false },
+      }}
+      onClose={vi.fn()}
+      onSaved={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByText("HDU CLI 登录"));
+  expect(screen.getByText(/当前登录尚未记录课表读取权限/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "重新授权" })).toBeEnabled();
 });
 
 it("keeps an approved login while a login state update outlives the request deadline", async () => {

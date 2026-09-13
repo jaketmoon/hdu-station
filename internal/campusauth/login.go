@@ -110,10 +110,11 @@ func (c *Client) awaitAuthorization(a *attempt) {
 				a.Status = "denied"
 			case nil:
 				// Missing scope never means approval of the requested permission.
-				if strings.TrimSpace(token.Scope) != CourseScope {
-					a.Status, a.Message = "error", "未获得课程查询权限，请重新授权并保留“读取课程信息”。"
+				scopes := strings.Fields(token.Scope)
+				if len(scopes) != 2 || !((scopes[0] == CourseScope && scopes[1] == ScheduleScope) || (scopes[1] == CourseScope && scopes[0] == ScheduleScope)) {
+					a.Status, a.Message = "error", "未获得课程信息和本人课表的读取权限，请重新授权并保留这两项权限。"
 				} else {
-					next := credentials{Version: 1, DeviceID: a.deviceID, Token: token.Token, Scopes: []string{CourseScope}, Managed: true}
+					next := credentials{Version: 1, DeviceID: a.deviceID, Token: token.Token, Scopes: []string{CourseScope, ScheduleScope}, Managed: true}
 					if token.ExpiresIn > 0 {
 						next.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second).UnixMilli()
 					}

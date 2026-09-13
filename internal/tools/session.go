@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jaketmoon/hdu-station/internal/config"
 )
@@ -47,7 +49,54 @@ type Session struct {
 	sources                config.Sources
 	zanao                  *ZanaoClient
 	xiaohongshu            *XiaohongshuClient
+	connectionChecks       map[string]func(context.Context) string
+	connections            map[string]string
 	Calls, Searches, Reads int
+}
+
+// Probe once per answer, with independent deadlines. A disconnected optional
+// service must never consume the search/retry budget of healthy sources.
+func (s *Session) checkConnections(ctx context.Context) {
+	if s.connections != nil {
+		return
+	}
+	s.progress("正在检查搜索来源的连接状态…")
+	checks := map[string]func(context.Context) string{}
+	if !s.sources.QQ.Disabled && s.client != nil {
+		checks["qq"] = s.client.Status
+	}
+	if s.sources.Zanao.Enabled {
+		checks["zanao"] = s.zanao.Status
+	}
+	if s.sources.Xiaohongshu.Enabled {
+		checks["xiaohongshu"] = s.xiaohongshu.Status
+	}
+	s.connections = map[string]string{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for id, check := range checks {
+		if custom := s.connectionChecks[id]; custom != nil {
+			check = custom
+		}
+		wg.Add(1)
+		go func(id string, check func(context.Context) string) {
+			defer wg.Done()
+			probe, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
+			status := check(probe)
+			mu.Lock()
+			s.connections[id] = status
+			mu.Unlock()
+		}(id, check)
+	}
+	wg.Wait()
+}
+
+func disconnectedSource(name, status string) string {
+	if status == "logged_out" || status == "auth_failed" {
+		return name + "未登录，本轮已跳过；可继续使用其他已连接来源。"
+	}
+	return name + "当前未连接或暂不可用，本轮已跳过；可继续使用其他已连接来源。"
 }
 
 func NewSession(c *Client, guilds []string, progress func(string), sources ...config.Sources) *Session {
@@ -99,6 +148,7 @@ func (s *Session) Search(ctx context.Context, in SearchInput) (SearchResult, err
 		result.Warnings = []string{"本轮读取已足够，请根据已有资料回答"}
 		return result, nil
 	}
+	s.checkConnections(ctx)
 	for _, source := range []struct {
 		id, name string
 		enabled  bool
@@ -120,6 +170,10 @@ func (s *Session) Search(ctx context.Context, in SearchInput) (SearchResult, err
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
+		if status := s.connections[source.id]; status != "ready" {
+			result.Warnings = append(result.Warnings, disconnectedSource(source.name, status))
+			continue
+		}
 		s.progress("正在" + source.name + "找「" + q + "」的同学讨论…")
 		found, err := source.search(ctx, q)
 		if ctx.Err() != nil {
@@ -127,6 +181,7 @@ func (s *Session) Search(ctx context.Context, in SearchInput) (SearchResult, err
 		}
 		if err != nil {
 			result.Warnings = append(result.Warnings, err.Error())
+			s.connections[source.id] = "unavailable"
 		}
 		result.Warnings = append(result.Warnings, found.Warnings...)
 		seen := map[string]bool{}
@@ -178,6 +233,11 @@ func (s *Session) Read(ctx context.Context, in ReadInput) (ReadResult, error) {
 			result.Warnings = append(result.Warnings, "帖子引用无效，请先搜索")
 			continue
 		}
+		s.checkConnections(ctx)
+		if s.connections[p.Source] != "ready" {
+			result.Warnings = append(result.Warnings, "该帖子来源当前未连接，本轮已跳过。")
+			continue
+		}
 		s.progress("正在读「" + trim(p.Title, 30) + "」和评论…")
 		var err error
 		var warnings []string
@@ -198,6 +258,7 @@ func (s *Session) Read(ctx context.Context, in ReadInput) (ReadResult, error) {
 		result.Warnings = append(result.Warnings, warnings...)
 		if err != nil {
 			result.Warnings = append(result.Warnings, err.Error())
+			s.connections[p.Source] = "unavailable"
 			continue
 		}
 		s.reads[id] = p
@@ -214,6 +275,14 @@ func (s *Session) Sources() []Post {
 	}
 	sort.Slice(posts, func(i, j int) bool { return posts[i].ID < posts[j].ID })
 	return posts
+}
+
+func (s *Session) ConnectionStates() map[string]string {
+	states := map[string]string{}
+	for id, status := range s.connections {
+		states[id] = status
+	}
+	return states
 }
 
 func appendDiscussion(p *Post, text, prefix string, limit int) {

@@ -9,7 +9,7 @@ const labels: Record<string, string> = {
 };
 
 const help: Record<string, string> = {
-  saved: "当前仅保留登录，校园功能尚未接入。",
+  saved: "可核实本学期开课；读取本人课表后，可筛选不撞课的班级。",
   expired: "请重新完成网页授权以更新登录信息。",
 };
 
@@ -168,13 +168,11 @@ export function CampusCard({
       <summary>
         <strong>HDU CLI 登录</strong>
         <span>
-          {waiting
-            ? "等待网页授权"
-            : (labels[connection.status] ?? "状态未知")}
+          {waiting ? "等待网页授权" : (labels[connection.status] ?? "状态未知")}
         </span>
       </summary>
       <p className="field-help">
-        在官方网页登录并授权，供后续接入校园功能使用。
+        授权读取课程信息和本人课表，核实本学期开课，并把合适的课放入空闲位置。
       </p>
       <div className="source-actions">
         <button
@@ -216,8 +214,8 @@ export function CampusCard({
           <p className="field-help">核对网页上的授权码</p>
           <code className="campus-user-code">{login.userCode}</code>
           <p className="field-help">
-            仅申请课程信息读取权限 · 剩余 {Math.floor(remaining / 60)} 分{" "}
-            {remaining % 60} 秒
+            仅申请课程信息与本人课表读取权限 · 剩余 {Math.floor(remaining / 60)}{" "}
+            分 {remaining % 60} 秒
           </p>
           <div className="source-actions">
             <button
@@ -258,6 +256,11 @@ export function CampusCard({
         授权仅保存在这台电脑上。
         {help[connection.status] ?? "社区选课讨论无需校园登录。"}
       </p>
+      {connection.status === "saved" && !connection.scheduleAccess && (
+        <p role="status" className="field-help">
+          当前登录尚未记录课表读取权限。点击“重新授权”后，即可按本人课表筛选。
+        </p>
+      )}
       {notice && (
         <p role="status" className="field-help">
           {notice}

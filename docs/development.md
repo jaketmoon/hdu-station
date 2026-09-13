@@ -35,4 +35,8 @@ make build
 
 校园网页授权测试覆盖批准、拒绝、过期、慢轮询、取消后的迟到结果、存储失败、退出后不回退旧令牌、URL 校验与凭证脱敏。`go test -race ./internal/campusauth .` 检查授权与桌面用例的并发访问。`HDU_STATION_LIVE_CAMPUS_AUTH=1 go test ./internal/campusauth -run TestLiveCampusDeviceAuthorization -v -count=1` 仅创建并取消一条未批准的真实授权请求，不打开网页或领取 PAT，不输出设备码或授权码。桌面与窄窗口 E2E 验证 HDU CLI 登录卡片、网页等待、本机状态更新及退出授权。
 
-课程分类查询已移除。回归检查 Agent 只注册社区搜索与读帖工具、登录状态不访问业务接口，以及 SQLite 从版本 1/2 升级至 3 后清理旧缓存但保留对话记录。
+课程分类查询已移除。Agent 只注册社区搜索、读帖、统一校园核实三个只读工具；独立课表展示、未来学期及跨校区查询不在产品范围。问题集和运行说明见 `internal/agent/testdata/README.md`，迭代记录见 `docs/iterations/2026-09-13-course-stability.md`。
+
+校园联动测试覆盖完整名称→核心词的顺序、按课程号区分和多候选选择、同学期隔离、分页不完整、单双周、时间缺失、用户时间偏好与多门课程组合冲突。`go test -race ./internal/tools ./internal/campusauth ./internal/agent .` 检查共享状态。`make e2e` 在桌面与390px窗口检查扩展授权说明、入口和筛选表格；浏览器用例使用测试替身，不代表实际教务数据。
+
+显式设置 `HDU_STATION_LIVE_CAMPUS=1` 和仅通过环境注入的 `HDU_STATION_CAMPUS_TEST_TOKEN` 后，可运行 `go test ./internal/tools -run '^TestLiveCampusOfferingsAndSchedule$' -v -count=1` 验证真实开课、模糊候选和完整课表，只打印数量与结论统计，不保存凭证。`HDU_STATION_LIVE_CAMPUS_MODEL=1 go test ./internal/agent -run '^TestLiveCampusMatchingAndFitThroughModel$' -v -count=1 -timeout=7m` 还会调用已配置模型（产生调用费用），将可见回答保存到数据根目录 `logs/campus-acceptance.md`。产品不读取共享 CLI 配置；正式使用需在 Station 设置中网页授权。

@@ -16,10 +16,11 @@ import (
 )
 
 type Client struct {
-	root string
-	mu   sync.Mutex
-	next time.Time
-	run  func(context.Context, ...string) (json.RawMessage, error)
+	root          string
+	mu            sync.Mutex
+	next          time.Time
+	cooldownUntil time.Time
+	run           func(context.Context, ...string) (json.RawMessage, error)
 }
 
 func NewClient(root string) *Client { c := &Client{root: root}; c.run = c.command; return c }
@@ -123,6 +124,13 @@ func (c *Client) command(ctx context.Context, args ...string) (json.RawMessage, 
 func (c *Client) read(ctx context.Context, progress func(string), args ...string) (json.RawMessage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	const rateLimitMessage = "QQ 频道暂时限流，已跳过本次请求，请稍后再试"
+	if time.Now().Before(c.cooldownUntil) {
+		return nil, errors.New(rateLimitMessage)
+	}
 	if wait := time.Until(c.next); wait > 0 {
 		if err := waitFor(ctx, wait); err != nil {
 			return nil, err
@@ -131,14 +139,11 @@ func (c *Client) read(ctx context.Context, progress func(string), args ...string
 	data, err := c.run(ctx, args...)
 	c.next = time.Now().Add(600 * time.Millisecond)
 	if err != nil && err.Error() == "rate_limited" {
-		progress("频道暂时限流，稍等一分钟后继续…")
-		if err := waitFor(ctx, 70*time.Second); err != nil {
-			return nil, err
-		}
-		data, err = c.run(ctx, args...)
-		if err != nil && err.Error() == "rate_limited" {
-			return nil, errors.New("频道仍在限流，请稍后再试")
-		}
+		// Keep the server cooldown without holding the shared client lock in a
+		// retry sleep. Other sources and already-read evidence remain usable.
+		c.cooldownUntil = time.Now().Add(70 * time.Second)
+		progress(rateLimitMessage)
+		return nil, errors.New(rateLimitMessage)
 	}
 	return data, err
 }

@@ -10,13 +10,14 @@ import (
 )
 
 type CampusConnection struct {
-	HasCredential bool   `json:"hasCredential"`
-	Status        string `json:"status"`
-	Message       string `json:"message,omitempty"`
+	HasCredential  bool   `json:"hasCredential"`
+	Status         string `json:"status"`
+	Message        string `json:"message,omitempty"`
+	ScheduleAccess bool   `json:"scheduleAccess"`
 }
 
 func (a *App) campusConnection() CampusConnection {
-	connection := CampusConnection{HasCredential: a.campus.Configured()}
+	connection := CampusConnection{HasCredential: a.campus.Configured(), ScheduleAccess: a.campus.HasScope(campusauth.ScheduleScope)}
 	if !campusauth.Supported(runtime.GOOS) {
 		connection.Status = "unsupported"
 		return connection

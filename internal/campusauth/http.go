@@ -90,7 +90,7 @@ type deviceResponse struct {
 func (a *apiClient) begin(ctx context.Context, deviceID string) (deviceResponse, error) {
 	var data deviceResponse
 	// Users can adjust this requested expiry on the official approval page.
-	values := url.Values{"client_id": {"hduhelp-cli"}, "scope": {CourseScope}, "device_name": {"HDU Station"}, "device_id": {deviceID}, "expires_at": {formatMillis(time.Now().Add(30 * 24 * time.Hour))}}
+	values := url.Values{"client_id": {"hduhelp-cli"}, "scope": {requestedScope}, "device_name": {"HDU Station"}, "device_id": {deviceID}, "expires_at": {formatMillis(time.Now().Add(30 * 24 * time.Hour))}}
 	err := a.request(ctx, http.MethodPost, "/open-apis/auth/device-authorization", values, "", "", &data)
 	if err != nil {
 		return deviceResponse{}, err

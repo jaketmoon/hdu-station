@@ -147,7 +147,7 @@ func createApplicationAt(root string) (*App, error) {
 		a.mu.Lock()
 		sources := a.cfg.Sources
 		a.mu.Unlock()
-		return (&agent.Engine{Model: m, Client: a.client, Sources: sources}).Answer(ctx, h, emit)
+		return (&agent.Engine{Model: m, Client: a.client, Sources: sources, Campus: tools.NewCampusClient(a.campus)}).Answer(ctx, h, emit)
 	}
 	return a, nil
 }
