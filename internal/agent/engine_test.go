@@ -34,7 +34,7 @@ func TestFollowupKeepsPreviouslyReadCitationWithoutSearchingAgain(t *testing.T) 
 	}
 }
 
-func TestCourseCategoryFollowupOnlyExposesCommunityTools(t *testing.T) {
+func TestCourseCategoryRemainsUnavailableWhileOfferingAndFitToolsAreReadOnly(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Messages []struct{ Role, Content string }
@@ -43,16 +43,16 @@ func TestCourseCategoryFollowupOnlyExposesCommunityTools(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 		}
-		allowed := map[string]bool{"search_courses": true, "read_course_posts": true}
+		allowed := map[string]bool{"search_courses": true, "read_course_posts": true, "check_course_offerings": true, "fit_courses_to_schedule": true, "show_course_results": true}
 		if len(request.Tools) != len(allowed) {
-			t.Error("retired campus tool is still registered")
+			t.Error("unexpected tool registration")
 		}
 		for _, tool := range request.Tools {
 			if !allowed[tool.Function.Name] {
-				t.Error("agent exposed a tool outside the community read operations")
+				t.Error("agent exposed a tool outside the authorized read operations")
 			}
 		}
-		if len(request.Messages) == 0 || request.Messages[0].Role != "system" || !strings.Contains(request.Messages[0].Content, "当前未接入校园教务查询") {
+		if len(request.Messages) == 0 || request.Messages[0].Role != "system" || !strings.Contains(request.Messages[0].Content, "当前未接入课程分类") {
 			t.Error("prompt still implies a campus login enables course classification")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -75,6 +75,8 @@ func TestXiaohongshuSearchReadAndCitationThroughAgent(t *testing.T) {
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reads++
 		switch r.URL.Path {
+		case "/api/v1/login/status":
+			fmt.Fprint(w, `{"success":true,"data":{"is_logged_in":true}}`)
 		case "/api/v1/feeds/search":
 			fmt.Fprint(w, `{"success":true,"data":{"feeds":[{"id":"`+noteID+`","xsecToken":"signature-private-sentinel","modelType":"note","noteCard":{"displayTitle":"杭电选修"}}]}}`)
 		case "/api/v1/feeds/detail":
@@ -115,7 +117,7 @@ func TestXiaohongshuSearchReadAndCitationThroughAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rounds != 3 || reads != 2 || result.Searches != 1 || result.Reads != 1 || !strings.Contains(result.Text, "https://www.xiaohongshu.com/explore/"+noteID) || strings.Contains(result.Text, "private-sentinel") {
+	if rounds != 3 || reads != 3 || result.Searches != 1 || result.Reads != 1 || !strings.Contains(result.Text, "https://www.xiaohongshu.com/explore/"+noteID) || strings.Contains(result.Text, "private-sentinel") {
 		t.Fatal("agent source search/read/citation pipeline incomplete")
 	}
 }

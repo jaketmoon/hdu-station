@@ -2,14 +2,63 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jaketmoon/hdu-station/internal/config"
+	"github.com/jaketmoon/hdu-station/internal/tools"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestPendingCampusSelectionUsesBoundToolChoiceWithinBudget(t *testing.T) {
+	for _, tc := range []struct {
+		required string
+		round    int
+		force    bool
+	}{
+		{"fit_courses_to_schedule", 0, true}, {"", 0, false}, {"unregistered", 0, false}, {"fit_courses_to_schedule", 6, false},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]json.RawMessage
+			if json.NewDecoder(r.Body).Decode(&body) != nil {
+				t.Error("invalid model payload")
+			}
+			var choice struct {
+				Type     string
+				Function struct{ Name string }
+			}
+			_ = json.Unmarshal(body["tool_choice"], &choice)
+			if tc.force && (choice.Type != "function" || choice.Function.Name != "fit_courses_to_schedule") {
+				t.Error("pending selection was allowed to skip confirmation")
+			}
+			if !tc.force && len(body["tool_choice"]) > 0 {
+				t.Error("forced an unavailable or budget-exhausted tool")
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"已处理\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+		}))
+		p := NewProvider(config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}, nil)
+		p.state.round = tc.round
+		p.requiredTool = func() string { return tc.required }
+		tool, err := utils.InferTool("fit_courses_to_schedule", "test", tools.NewCampusSession(nil, nil).FitCourses)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := tool.Info(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.tools = []*schema.ToolInfo{info}
+		if _, err = p.Generate(context.Background(), []*schema.Message{schema.UserMessage("检查候选")}); err != nil {
+			t.Fatal(err)
+		}
+		server.Close()
+	}
+}
 
 func TestStreamToolCallsAndText(t *testing.T) {
 	events := []Event{}

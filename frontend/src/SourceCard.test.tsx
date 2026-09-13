@@ -95,6 +95,7 @@ describe("source account settings", () => {
     expand();
     await reconnect();
     expect(screen.getByRole("button", { name: "清除登录凭证" })).toBeDisabled();
+    await waitFor(() => expect(api.pollLogin).toHaveBeenCalled());
     await act(async () => {
       scanned({ id: "login-1", status: "ready" });
     });
@@ -105,7 +106,7 @@ describe("source account settings", () => {
     await waitFor(() =>
       expect(api.clearSource).toHaveBeenCalledWith("xiaohongshu"),
     );
-    expect(screen.getByText("需要重新登录")).toBeVisible();
+    expect(await screen.findByText("需要重新登录")).toBeVisible();
   });
   it("persists the enabled switch independently of the model form", async () => {
     vi.mocked(api.enableSource).mockResolvedValue({

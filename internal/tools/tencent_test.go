@@ -25,6 +25,7 @@ func TestCourseToolsOnlyReturnVisibleFieldsAndReadSearchedPosts(t *testing.T) {
 		return nil, errors.New("unexpected command")
 	}}
 	s := NewSession(client, []string{"test-scope"}, nil)
+	s.connectionChecks = map[string]func(context.Context) string{"qq": func(context.Context) string { return "ready" }}
 	invalid, err := s.Read(context.Background(), ReadInput{Posts: []string{"made-up"}})
 	if err != nil || len(invalid.Warnings) == 0 || len(calls) != 0 {
 		t.Fatal("forged reference reached CLI")
@@ -62,6 +63,7 @@ func TestPartialChannelsStayUsefulAndEmptyIsNotFailure(t *testing.T) {
 		return json.RawMessage(`{"guild_feeds":[]}`), nil
 	}}
 	s := NewSession(client, []string{"available", "unavailable"}, nil)
+	s.connectionChecks = map[string]func(context.Context) string{"qq": func(context.Context) string { return "ready" }}
 	result, err := s.Search(context.Background(), SearchInput{Query: "课程"})
 	if err != nil || len(result.Warnings) != 1 || len(result.Posts) != 0 {
 		t.Fatal("failure was treated as empty evidence")

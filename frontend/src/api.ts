@@ -46,6 +46,7 @@ export type SettingsInput = {
 };
 export type LoginSource = "qq" | "xiaohongshu";
 export type CampusConnection = {
+  scheduleAccess?: boolean;
   hasCredential: boolean;
   status: string;
   message?: string;

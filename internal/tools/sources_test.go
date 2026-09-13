@@ -49,6 +49,8 @@ func TestMixedSourcesSearchReadCacheAndCredentialIsolation(t *testing.T) {
 		var input map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&input)
 		switch r.URL.Path {
+		case "/api/v1/login/status":
+			fmt.Fprint(w, `{"success":true,"data":{"is_logged_in":true}}`)
 		case "/api/v1/feeds/search":
 			if r.Method != "POST" || input["keyword"] != "杭电 通识选修" {
 				t.Error("search lost campus scope")
@@ -83,9 +85,12 @@ func TestMixedSourcesSearchReadCacheAndCredentialIsolation(t *testing.T) {
 		return nil, errors.New("unexpected operation")
 	}}
 	s := NewSession(qq, []string{"guild-private-sentinel"}, nil, cfg)
+	s.connectionChecks = map[string]func(context.Context) string{"qq": func(context.Context) string { return "ready" }}
 	mockZanao(t, s.zanao, func(r *http.Request) string {
 		zanaoCalls++
 		switch r.URL.Path {
+		case "/user/info":
+			return `{"errno":0,"data":{"school_name":"测试学校"}}`
 		case "/thread/v2/search":
 			if r.URL.Query().Get("wd") != "通识选修" || r.URL.Query().Get("cur_page") != "1" {
 				t.Error("unexpected search params")
@@ -143,7 +148,7 @@ func TestMixedSourcesSearchReadCacheAndCredentialIsolation(t *testing.T) {
 		}
 	}
 	_, _ = s.Read(ctx, ReadInput{Posts: append(ids, "forged-post")})
-	if xhsCalls != 2 || zanaoCalls != 4 || qqCalls != 3 || s.Reads != 3 {
+	if xhsCalls != 3 || zanaoCalls != 5 || qqCalls != 3 || s.Reads != 3 {
 		t.Fatal("duplicate or forged reference reached upstream")
 	}
 	again, _ := s.Search(ctx, SearchInput{Query: "通识选修", Source: "zanao"})
@@ -164,6 +169,8 @@ func TestSourceSelectionFailuresAndEmptyResults(t *testing.T) {
 		}
 	}
 	s.sources.Zanao.Enabled = true
+	s.connections = nil
+	s.connectionChecks = map[string]func(context.Context) string{"zanao": func(context.Context) string { return "ready" }}
 	s.zanao = NewZanaoClient(config.Zanao{Enabled: true, SchoolAlias: "test", Token: "private-sentinel"})
 	mockZanao(t, s.zanao, func(r *http.Request) string {
 		if r.URL.Query().Get("cate_id") == "10" {

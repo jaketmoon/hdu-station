@@ -21,7 +21,7 @@ func response(status int, body string) *http.Response {
 }
 
 const deviceJSON = `{"device_code":"device-private-sentinel","user_code":"ABCD-EFGH","verification_uri_complete":"https://neo.hduhelp.com/account/tokens/authorize?user_code=ABCD-EFGH","expires_in":600,"interval":5}`
-const tokenJSON = `{"access_token":"new-private-sentinel","token_type":"Bearer","scope":"academic:course:read","expires_in":3600}`
+const tokenJSON = `{"access_token":"new-private-sentinel","token_type":"Bearer","scope":"academic:course:read academic:schedule:read","expires_in":3600}`
 
 func fixture(t *testing.T, handler roundTrip) (*Client, chan time.Duration, chan struct{}, string) {
 	t.Helper()
@@ -126,13 +126,13 @@ func eventually(t *testing.T, f func() bool) {
 	}
 }
 
-func TestWebAuthorizationUsesOnlyCourseScopeAndHonorsPollBackoff(t *testing.T) {
+func TestWebAuthorizationUsesCourseAndScheduleScopesAndHonorsPollBackoff(t *testing.T) {
 	var polls atomic.Int32
 	c, waits, ticks, root := fixture(t, func(r *http.Request) (*http.Response, error) {
 		_ = r.ParseForm()
 		switch r.URL.Path {
 		case "/hduhelp-neo/open-apis/auth/device-authorization":
-			if r.Method != "POST" || r.Form.Get("client_id") != "hduhelp-cli" || r.Form.Get("scope") != CourseScope || r.Form.Get("device_name") != "HDU Station" || r.Form.Get("device_id") == "" || r.Header.Get("Authorization") != "" || r.Form.Get("supersedes_id") != "" {
+			if r.Method != "POST" || r.Form.Get("client_id") != "hduhelp-cli" || r.Form.Get("scope") != requestedScope || r.Form.Get("device_name") != "HDU Station" || r.Form.Get("device_id") == "" || r.Header.Get("Authorization") != "" || r.Form.Get("supersedes_id") != "" {
 				t.Error("unexpected permission, identity or replacement request")
 			}
 			return response(200, deviceJSON), nil
@@ -205,6 +205,8 @@ func TestDeniedExpiredAndMissingScopeDoNotReplaceExistingCredential(t *testing.T
 		{"denied", `{"error":"access_denied"}`, "denied", 400, false},
 		{"expired", `{"error":"expired_token"}`, "expired", 400, false},
 		{"missing-scope", strings.Replace(tokenJSON, CourseScope, "", 1), "error", 200, true},
+		{"old-course-only", strings.Replace(tokenJSON, " "+ScheduleScope, "", 1), "error", 200, true},
+		{"duplicate-scope", strings.Replace(tokenJSON, ScheduleScope, CourseScope, 1), "error", 200, true},
 		{"extra-scope", strings.Replace(tokenJSON, CourseScope, CourseScope+" academic:grade:read", 1), "error", 200, true},
 		{"malformed", `{"msg":"private-sentinel"}`, "error", 200, false},
 	} {
@@ -402,5 +404,27 @@ func TestInvalidFilesAndPublicJSONDoNotExposeCredentials(t *testing.T) {
 	data, _ := json.Marshal(credentials{Token: "private-sentinel"})
 	if strings.Contains(string(data), "private-sentinel") {
 		t.Fatal("credential serialized")
+	}
+}
+
+func TestOldCourseAuthorizationKeepsCourseReadsAndRequiresScheduleUpgrade(t *testing.T) {
+	c, _, _, _ := fixture(t, func(*http.Request) (*http.Response, error) {
+		t.Error("permission check made network request")
+		return nil, ErrUnavailable
+	})
+	c.credentials.Managed = true
+	c.credentials.Scopes = []string{CourseScope}
+	if _, err := c.AccessTokenFor(context.Background(), CourseScope); err != nil {
+		t.Fatal("old course grant lost")
+	}
+	if _, err := c.AccessTokenFor(context.Background(), ScheduleScope); err != ErrScope {
+		t.Fatal("personal schedule read bypassed permission upgrade")
+	}
+	if c.HasScope(ScheduleScope) {
+		t.Fatal("old grant advertised new permission")
+	}
+	c.credentials.Scopes = []string{CourseScope, ScheduleScope}
+	if _, err := c.AccessTokenFor(context.Background(), ScheduleScope); err != nil {
+		t.Fatal("approved schedule grant denied")
 	}
 }

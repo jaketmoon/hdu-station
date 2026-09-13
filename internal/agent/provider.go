@@ -25,12 +25,15 @@ type runState struct {
 	actualModel string
 }
 type Provider struct {
-	config      config.Model
-	client      *http.Client
-	tools       []*schema.ToolInfo
-	emit        func(Event)
-	state       *runState
-	canUseTools func() bool
+	config        config.Model
+	client        *http.Client
+	tools         []*schema.ToolInfo
+	emit          func(Event)
+	state         *runState
+	canUseTools   func() bool
+	requiredTool  func() string
+	completed     func() string
+	completionGap func() string
 }
 
 func NewProvider(c config.Model, emit func(Event)) *Provider {
@@ -56,6 +59,11 @@ func (p *Provider) Stream(ctx context.Context, input []*schema.Message, opts ...
 
 // Generate streams HTTP deltas to the desktop while Eino owns the tool loop.
 func (p *Provider) Generate(ctx context.Context, input []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	if p.completed != nil {
+		if text := p.completed(); text != "" {
+			return schema.AssistantMessage(text, nil), nil
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 90*1e9)
 	defer cancel()
 	p.state.round++
@@ -79,12 +87,18 @@ func (p *Provider) Generate(ctx context.Context, input []*schema.Message, _ ...m
 				return nil, errors.New("工具参数定义不正确")
 			}
 			definitions = append(definitions, map[string]any{"type": "function", "function": map[string]any{"name": t.Name, "description": t.Desc, "parameters": params}})
+			if p.requiredTool != nil && p.requiredTool() == t.Name {
+				payload["tool_choice"] = map[string]any{"type": "function", "function": map[string]string{"name": t.Name}}
+			}
 		}
 		if len(definitions) > 0 {
 			payload["tools"] = definitions
 		}
 	} else {
 		messages = append(messages, map[string]any{"role": "system", "content": "请根据已经读到的资料完成回答；如果资料不足，请如实说明。"})
+		if p.requiredTool != nil && p.requiredTool() != "" {
+			messages = append(messages, map[string]any{"role": "system", "content": "尚有未完成的工具确认步骤。只能如实标记尚未核实，不能自行推断工具结论或把未检查说成检查失败。"})
+		}
 		payload["messages"] = messages
 	}
 	data, err := json.Marshal(payload)
@@ -120,7 +134,15 @@ func (p *Provider) Generate(ctx context.Context, input []*schema.Message, _ ...m
 			return nil, fmt.Errorf("模型暂时不可用（HTTP %d）", response.StatusCode)
 		}
 	}
-	return p.consume(response.Body)
+	result, err := p.consume(response.Body)
+	if err == nil && len(result.ToolCalls) == 0 && p.completionGap != nil && p.state.round < 6 && (p.canUseTools == nil || p.canUseTools()) {
+		if gap := p.completionGap(); gap != "" {
+			response.Body.Close()
+			next := append(append([]*schema.Message(nil), input...), result, schema.SystemMessage(gap))
+			return p.Generate(ctx, next)
+		}
+	}
+	return result, err
 }
 func (p *Provider) consume(body io.Reader) (*schema.Message, error) {
 	result := schema.AssistantMessage("", nil)

@@ -21,7 +21,11 @@ test.beforeEach(async ({ page }) => {
       baseURL: "https://api.deepseek.com",
       model: "deepseek-flash",
       hasAPIKey: true,
-      campus: { hasCredential: false, status: "logged_out" },
+      campus: {
+        hasCredential: false,
+        status: "logged_out",
+        scheduleAccess: false,
+      },
       qqStatus: "ready",
       qqEnabled: true,
       dataRoot: "/test",
@@ -81,7 +85,11 @@ test.beforeEach(async ({ page }) => {
           }),
           PollCampusLogin: async () => {
             await new Promise((resolve) => setTimeout(resolve, 2000));
-            settings.campus = { hasCredential: true, status: "saved" };
+            settings.campus = {
+              hasCredential: true,
+              status: "saved",
+              scheduleAccess: true,
+            };
             return {
               id: "campus-login",
               status: "ready",
@@ -95,7 +103,11 @@ test.beforeEach(async ({ page }) => {
             expiresAt: 0,
           }),
           LogoutCampus: async () => {
-            settings.campus = { hasCredential: false, status: "logged_out" };
+            settings.campus = {
+              hasCredential: false,
+              status: "logged_out",
+              scheduleAccess: false,
+            };
             return { ...settings.campus };
           },
           CheckSource: async (source: string) =>
@@ -198,6 +210,12 @@ test.beforeEach(async ({ page }) => {
             } else await new Promise((resolve) => setTimeout(resolve, 400));
             let answer =
               "如果你更在意**作业少、考核轻松**，可以先看看下面这几门。\n\n### 可以优先了解\n\n| 课程 | 同学提到的体验 | 参考 |\n| --- | --- | --- |\n| 戏曲鉴赏 | 有同学提到期末以鉴赏作业为主，平时签到不多。不同学期要求可能有变化。 | [原帖](https://pd.qq.com/s/example1) |\n| 中国传统美学导论 | 有同学认可课堂氛围和给分，仍需要认真完成期末作业。 | [原帖](https://pd.qq.com/s/example2) |\n\n**选课前再确认两件事：**授课老师是否相同，以及本学期的考核安排。社区里的“水”是个人感受，不能保证每个人都拿高分。\n\n你更想要不用考试的，还是不用做小组作业的？";
+            if (
+              question.includes("空闲时间") ||
+              question.includes("本学期开课")
+            )
+              answer =
+                "已核实教务默认学期：2026–2027 学年第1学期。\n\n| 课程（课程号 / 班级号） | 老师 | 上课时间 | 课表筛选 |\n| --- | --- | --- | --- |\n| 影视音乐赏析（001 / class-a0123456789ABCDEF0123456789ABCDEF） | 测试老师 | 星期二第10–11节，第1–17周 | 可放入空闲位置 |\n| 戏曲鉴赏（002 / class-b0123456789ABCDEF0123456789ABCDEF） | 测试老师 | 星期三第6–7节，第1–17周 | 与已选课程冲突 |\n\n网上的“影视音乐鉴赏”可能对应“影视音乐赏析”（001）。建议先考虑 class-a；是否有余量和选课资格仍需以教务系统为准。";
             if (question === "长回答滚动测试")
               answer = Array(5).fill(answer).join("\n\n");
             for (
@@ -220,7 +238,7 @@ test.beforeEach(async ({ page }) => {
   }, loginQR);
 });
 
-test("campus CLI login remains available without course lookup in both windows", async ({
+test("campus course and schedule authorization fits both windows", async ({
   page,
 }, testInfo) => {
   await page.goto("/");
@@ -239,7 +257,9 @@ test("campus CLI login remains available without course lookup in both windows",
     path: `test-results/${testInfo.project.name}-campus-authorizing.png`,
   });
   await expect(campus.locator("summary")).toContainText("已登录");
-  await expect(campus).toContainText("当前仅保留登录，校园功能尚未接入。");
+  await expect(campus).toContainText(
+    "可核实本学期开课；读取本人课表后，可筛选不撞课的班级。",
+  );
   await expect(campus).not.toContainText("查询课程类别");
   await campus.scrollIntoViewIfNeeded();
   expect(
@@ -446,3 +466,21 @@ for (const source of ["QQ 频道", "小红书"]) {
     await expect(card.getByRole("switch")).not.toBeVisible();
   });
 }
+
+test("course fit recommendation and course IDs remain readable", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: /空闲时间塞门课/ }).click();
+  await expect(page.getByRole("button", { name: "复制回答" })).toBeVisible();
+  await expect(page.getByRole("table")).toContainText("class-a");
+  await expect(page.getByRole("table")).toContainText("与已选课程冲突");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBeTruthy();
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-course-fit.png`,
+  });
+});
