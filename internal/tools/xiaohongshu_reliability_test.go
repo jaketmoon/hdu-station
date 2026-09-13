@@ -61,6 +61,7 @@ func TestXiaohongshuFailureCategoriesAndRetryLimit(t *testing.T) {
 		message   string
 	}{
 		{"auth", 401, 1, "连接验证失败"},
+		{"security challenge", 428, 1, "安全验证"},
 		{"rate limit", 429, 1, "限流"},
 		{"invalid request", 400, 1, "数据格式无效"},
 		{"server failure", 500, 2, "服务处理请求失败"},

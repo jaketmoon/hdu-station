@@ -21,6 +21,7 @@ import (
 // LoginChallenge is settings-only. Account tokens, device codes and cookie
 // paths never cross the Wails boundary or enter an agent tool response.
 type LoginChallenge struct {
+	Kind      string `json:"kind,omitempty"`
 	Status    string `json:"status"`
 	Image     string `json:"image,omitempty"`
 	ExpiresAt int64  `json:"expiresAt,omitempty"`

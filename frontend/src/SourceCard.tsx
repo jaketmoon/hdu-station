@@ -10,6 +10,7 @@ import { Icon } from "./Icon";
 
 const labels: Record<string, string> = {
   ready: "已连接",
+  verification_required: "需要安全验证",
   not_installed: "尚未连接",
   logged_out: "需要重新登录",
   unsupported: "当前平台暂不支持",
@@ -48,7 +49,7 @@ export function SourceCard({
     };
   }, []);
 
-  function connected(status: string) {
+  function connected(status: string, verification = false) {
     const { connection, onChange } = current.current;
     onChange(source, {
       enabled: connection.enabled,
@@ -59,9 +60,11 @@ export function SourceCard({
         : "disabled",
     });
     setNotice(
-      status === "saved"
-        ? "登录凭证已保存，可稍后重新检查连接。"
-        : `登录成功，凭证已保存在本机。${connection.enabled ? "可以开始搜索了。" : "启用后即可参与搜索。"}`,
+      verification
+        ? "安全验证已通过，已确认搜索恢复可用。"
+        : status === "saved"
+          ? "登录凭证已保存，可稍后重新检查连接。"
+          : `登录成功，凭证已保存在本机。${source === "xiaohongshu" ? "搜索可能仍需单独的安全验证。" : connection.enabled ? "可以开始搜索了。" : "启用后即可参与搜索。"}`,
     );
   }
 
@@ -95,8 +98,14 @@ export function SourceCard({
           value?.id === id ? { ...value, ...result, image: undefined } : value,
         );
         if (result.status === "ready" || result.status === "saved")
-          connected(result.status);
-        else if (result.status === "cancelled")
+          connected(result.status, login.kind === "verification");
+        else if (result.status === "verification_required") {
+          current.current.onChange(source, {
+            ...current.current.connection,
+            status: "verification_required",
+          });
+          setNotice("已登录，但搜索需要安全验证，请点击安全验证。");
+        } else if (result.status === "cancelled")
           setNotice("登录已取消，可以重新连接。");
       } catch (error) {
         if (stopped) return;
@@ -122,7 +131,7 @@ export function SourceCard({
   }, [login?.id, login?.status]);
 
   async function action(
-    kind: "check" | "enable" | "connect" | "clear",
+    kind: "check" | "enable" | "connect" | "verify" | "clear",
     enabled?: boolean,
   ) {
     setBusy(kind);
@@ -130,8 +139,11 @@ export function SourceCard({
     setNotice("");
     if (kind !== "check") setLogin(null);
     try {
-      if (kind === "connect") {
-        const result = await api.beginLogin(source);
+      if (kind === "connect" || kind === "verify") {
+        const result =
+          kind === "verify"
+            ? await api.beginVerification()
+            : await api.beginLogin(source);
         if (!mounted.current) {
           void api.cancelLogin(result.id).catch(() => {});
           return;
@@ -144,11 +156,15 @@ export function SourceCard({
           const { connection, onChange } = current.current;
           onChange(source, {
             enabled: connection.enabled,
-            status: connection.enabled ? "logged_out" : "disabled",
+            status: connection.enabled
+              ? result.kind === "verification"
+                ? "verification_required"
+                : "logged_out"
+              : "disabled",
           });
         }
         if (result.status === "ready" || result.status === "saved")
-          connected(result.status);
+          connected(result.status, result.kind === "verification");
       } else {
         const result =
           kind === "check"
@@ -175,8 +191,9 @@ export function SourceCard({
     }
   }
   const waiting = login?.status === "waiting";
+  const verification = login?.kind === "verification" || busy === "verify";
   useEffect(() => {
-    if (expanded && (waiting || busy === "connect")) {
+    if (expanded && (waiting || busy === "connect" || busy === "verify")) {
       loginPanel.current?.scrollIntoView?.({ block: "nearest" });
     }
   }, [expanded, waiting, busy]);
@@ -202,7 +219,9 @@ export function SourceCard({
                 className={`status-dot ${connection.status === "ready" && !waiting ? "online" : ""}`}
               />
               {waiting
-                ? "等待扫码登录"
+                ? verification
+                  ? "等待扫码验证身份"
+                  : "等待扫码登录"
                 : (labels[connection.status] ?? "正在检查…")}
             </span>
           </span>
@@ -241,7 +260,23 @@ export function SourceCard({
             ? "阅读杭电频道里的课程讨论和同学评价。"
             : "查找杭电相关笔记，阅读文字与评论。"}
         </p>
+        {connection.status === "verification_required" && !waiting && (
+          <p className="field-help">
+            账号已登录，但搜索需要额外验证。请点击安全验证，用已登录该账号的小红书
+            App 扫码。
+          </p>
+        )}
         <div className="source-actions">
+          {source === "xiaohongshu" && (
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={locked || waiting || unsupported}
+              onClick={() => void action("verify")}
+            >
+              {busy === "verify" ? "正在获取验证二维码…" : "安全验证"}
+            </button>
+          )}
           <button
             type="button"
             className="secondary-button"
@@ -264,17 +299,20 @@ export function SourceCard({
             {busy === "clear" ? "清除中…" : "清除登录凭证"}
           </button>
         </div>
-        {(busy === "connect" || waiting || login?.status === "expired") && (
+        {(busy === "connect" ||
+          busy === "verify" ||
+          waiting ||
+          login?.status === "expired") && (
           <div
             ref={loginPanel}
             className="source-login"
-            aria-label={`${name}扫码登录`}
+            aria-label={`${name}${verification ? "安全验证" : "扫码登录"}`}
           >
             <div className="source-qr">
               {waiting && login?.image ? (
                 <img
                   src={login.image}
-                  alt={`${name}登录二维码`}
+                  alt={`${name}${verification ? "安全验证" : "登录"}二维码`}
                   width={184}
                   height={184}
                 />
@@ -299,8 +337,12 @@ export function SourceCard({
             </strong>
             <p className="field-help">
               {login?.status === "expired"
-                ? "点击重新连接，获取新的二维码。"
-                : "在手机上确认登录，凭证会自动保存。"}
+                ? verification
+                  ? "点击安全验证，获取新的验证二维码。"
+                  : "点击重新连接，获取新的二维码。"
+                : verification
+                  ? "使用已登录该账号的小红书 App 扫码验证身份。验证后会检查搜索是否恢复。"
+                  : "在手机上确认登录，凭证会自动保存。"}
             </p>
             {waiting && (
               <>

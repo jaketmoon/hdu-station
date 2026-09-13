@@ -16,6 +16,7 @@ var errSourceUnavailable = errors.New("来源暂时无法连接")
 var errSourceRateLimit = errors.New("来源请求过于频繁")
 var errSourceTimeout = errors.New("来源请求超时")
 var errSourceServer = errors.New("来源服务处理失败")
+var errSourceVerification = errors.New("小红书需要安全验证，请在设置中点击安全验证并扫码，本轮已跳过小红书")
 
 func sourceHTTPClient(timeout time.Duration, local bool) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -48,6 +49,8 @@ func sourceJSON(ctx context.Context, client *http.Client, method, address string
 	}
 	defer resp.Body.Close()
 	switch {
+	case resp.StatusCode == http.StatusPreconditionRequired:
+		return errSourceVerification
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		return errSourceAuth
 	case resp.StatusCode == 429:
@@ -73,6 +76,9 @@ func sourceJSON(ctx context.Context, client *http.Client, method, address string
 }
 
 func sourceError(name string, err error) error {
+	if errors.Is(err, errSourceVerification) {
+		return errSourceVerification
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}

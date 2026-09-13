@@ -18,3 +18,6 @@ XHS_TEST_BROWSER_BIN=/absolute/path/to/Chromium go test ./xiaohongshu -run '^Tes
 ```
 
 覆盖持续变化的页面、加载中的空数组、成功的空结果、失败状态和取消操作。未指定浏览器路径时跳过，不自动安装浏览器。升级上游版本时需重新核对搜索状态字段，不能直接忽略补丁冲突。
+
+
+2026-09-13：补丁新增搜索安全验证的设置接口。搜索跳转到 `/website-login/captcha` 时立即返回 HTTP 428，登录状态额外返回 `verification_required`；保留触发验证的浏览器最多 50 秒。设置通过固定 `/security/qrcode`、`/security/poll`、`/security/cancel` POST 接口取本站二维码、检查实际搜索恢复并取消等待。会话只在内存中；二维码、会话 URL 和 Cookie 不进入模型与日志。扫码后必须实际搜索成功才保存 Cookie 并显示恢复；二维码过期重新发起，不能复用普通登录二维码。旧版服务不支持时设置明确提示更新组件。

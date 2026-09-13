@@ -17,8 +17,120 @@ index 1d9173c..21c6edf 100644
  	base, err := os.UserCacheDir()
  	if err != nil {
  		return "", err
+diff --git a/handlers_api.go b/handlers_api.go
+index ca5eff6..fb69214 100644
+--- a/handlers_api.go
++++ b/handlers_api.go
+@@ -161,6 +161,10 @@ func (s *AppServer) searchFeedsHandler(c *gin.Context) {
+ 	}
+ 
+ 	result, err := s.xiaohongshuService.SearchFeeds(c.Request.Context(), keyword, filters)
++	if err == xiaohongshu.ErrSecurityVerification {
++		respondError(c, http.StatusPreconditionRequired, "SECURITY_VERIFICATION_REQUIRED", "需要安全验证", nil)
++		return
++	}
+ 	if err != nil {
+ 		respondError(c, http.StatusInternalServerError, "SEARCH_FEEDS_FAILED",
+ 			"搜索Feeds失败", err.Error())
+diff --git a/routes.go b/routes.go
+index f6bffc3..6a7fb76 100644
+--- a/routes.go
++++ b/routes.go
+@@ -46,6 +46,9 @@ func setupRoutes(appServer *AppServer) *gin.Engine {
+ 	api := protected.Group("/api/v1")
+ 	{
+ 		api.GET("/login/status", appServer.checkLoginStatusHandler)
++		api.POST("/security/qrcode", appServer.securityQRHandler)
++		api.POST("/security/poll", appServer.securityPollHandler)
++		api.POST("/security/cancel", appServer.securityCancelHandler)
+ 		api.GET("/login/qrcode", appServer.getLoginQrcodeHandler)
+ 		api.DELETE("/login/cookies", appServer.deleteCookiesHandler)
+ 		api.POST("/publish", appServer.publishHandler)
+diff --git a/service.go b/service.go
+index 499b216..010de5d 100644
+--- a/service.go
++++ b/service.go
+@@ -3,6 +3,7 @@ package main
+ import (
+ 	"context"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"os"
+ 	"time"
+@@ -20,7 +21,8 @@ import (
+ 
+ // XiaohongshuService 小红书业务服务
+ type XiaohongshuService struct {
+-	logins loginSessions
++	logins   loginSessions
++	security securitySession
+ }
+ 
+ // NewXiaohongshuService 创建小红书服务实例
+@@ -42,9 +44,10 @@ type PublishRequest struct {
+ 
+ // LoginStatusResponse 登录状态响应
+ type LoginStatusResponse struct {
+-	IsLoggedIn bool   `json:"is_logged_in"`
+-	Username   string `json:"username,omitempty"` // 当前登录账号的昵称
+-	UserID     string `json:"user_id,omitempty"`  // 用户唯一标识（个人主页 URL 中的 ID）
++	VerificationRequired bool   `json:"verification_required,omitempty"`
++	IsLoggedIn           bool   `json:"is_logged_in"`
++	Username             string `json:"username,omitempty"` // 当前登录账号的昵称
++	UserID               string `json:"user_id,omitempty"`  // 用户唯一标识（个人主页 URL 中的 ID）
+ }
+ 
+ // LoginQrcodeResponse 登录扫码二维码
+@@ -96,6 +99,7 @@ type UserProfileResponse struct {
+ 
+ // DeleteCookies 删除 cookies 文件，用于登录重置
+ func (s *XiaohongshuService) DeleteCookies(ctx context.Context) error {
++	s.security.clear()
+ 	cookiePath := cookies.GetCookiesFilePath()
+ 	cookieLoader := cookies.NewLoadCookie(cookiePath)
+ 	return cookieLoader.DeleteCookies()
+@@ -103,6 +107,9 @@ func (s *XiaohongshuService) DeleteCookies(ctx context.Context) error {
+ 
+ // CheckLoginStatus 检查登录状态
+ func (s *XiaohongshuService) CheckLoginStatus(ctx context.Context) (*LoginStatusResponse, error) {
++	if s.security.required() {
++		return &LoginStatusResponse{IsLoggedIn: true, VerificationRequired: true}, nil
++	}
+ 	b := newBrowser()
+ 	defer b.Close()
+ 
+@@ -390,15 +397,23 @@ func (s *XiaohongshuService) ListFeeds(ctx context.Context) (*FeedsListResponse,
+ }
+ 
+ func (s *XiaohongshuService) SearchFeeds(ctx context.Context, keyword string, filters ...xiaohongshu.FilterOption) (*FeedsListResponse, error) {
++	if s.security.required() {
++		return nil, xiaohongshu.ErrSecurityVerification
++	}
+ 	b := newBrowser()
+-	defer b.Close()
+-
+ 	page := b.NewPage()
+-	defer page.Close()
+-
++	retained := false
++	defer func() {
++		if !retained {
++			_ = page.Close()
++			b.Close()
++		}
++	}()
+ 	action := xiaohongshu.NewSearchAction(page)
+-
+ 	feeds, err := action.Search(ctx, keyword, filters...)
++	if errors.Is(err, xiaohongshu.ErrSecurityVerification) {
++		retained = s.security.retain(page, func() { _ = page.Close(); b.Close() })
++	}
+ 	if err != nil {
+ 		return nil, err
+ 	}
 diff --git a/xiaohongshu/search.go b/xiaohongshu/search.go
-index 7c22952..0b7bdb5 100644
+index 7c22952..d64c03f 100644
 --- a/xiaohongshu/search.go
 +++ b/xiaohongshu/search.go
 @@ -100,14 +100,15 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, filters ...Fi
@@ -41,7 +153,7 @@ index 7c22952..0b7bdb5 100644
  	humanize.Delay(ctx, humanize.AfterNavigate)
  
  	if len(pending) > 0 {
-@@ -165,6 +166,35 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, filters ...Fi
+@@ -165,6 +166,39 @@ func (s *SearchAction) Search(ctx context.Context, keyword string, filters ...Fi
  	return onlyNotes(feeds), nil
  }
  
@@ -50,6 +162,7 @@ index 7c22952..0b7bdb5 100644
 +// A successful empty result is ready; the initial loading [] is not.
 +func waitSearchData(page *rod.Page) error {
 +	const ready = `() => {
++  if (location.pathname === '/website-login/captcha') return true;
 +  const unref = x => x && typeof x === 'object' ? (x.value !== undefined ? x.value : x._value) : x;
 +  const search = window.__INITIAL_STATE__?.search;
 +  if (!search) return false;
@@ -60,6 +173,9 @@ index 7c22952..0b7bdb5 100644
 + }`
 +	if err := page.Wait(rod.Eval(ready)); err != nil {
 +		return fmt.Errorf("等待搜索结果失败: %w", err)
++	}
++	if IsSecurityPage(page) {
++		return ErrSecurityVerification
 +	}
 +	state, err := page.Eval(`() => {
 +  const s = window.__INITIAL_STATE__?.search?.state;
@@ -77,12 +193,23 @@ index 7c22952..0b7bdb5 100644
  // feedIDsJS 读当前结果集的 id 列表，用来判断数据有没有换一批。
  const feedIDsJS = `() => {
  	const f = window.__INITIAL_STATE__?.search?.feeds;
+@@ -258,3 +292,11 @@ func makeSearchURL(keyword string) string {
+ 	//https://www.xiaohongshu.com/search_result?keyword=%25E7%258E%258B%25E5%25AD%2590&source=web_explore_feed
+ 	return fmt.Sprintf("https://www.xiaohongshu.com/search_result?%s", values.Encode())
+ }
++
++// Security challenges must be completed by the account holder, never retried as searches.
++var ErrSecurityVerification = fmt.Errorf("需要安全验证")
++
++func IsSecurityPage(page *rod.Page) bool {
++	v, err := page.Eval(`() => location.hostname === 'www.xiaohongshu.com' && location.pathname === '/website-login/captcha'`)
++	return err == nil && v.Value.Bool()
++}
 diff --git a/xiaohongshu/search_ready_test.go b/xiaohongshu/search_ready_test.go
 new file mode 100644
-index 0000000..4ca57d7
 --- /dev/null
 +++ b/xiaohongshu/search_ready_test.go
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,82 @@
 +package xiaohongshu
 +
 +import (
@@ -145,6 +272,17 @@ index 0000000..4ca57d7
 +			t.Fatal("failed search accepted")
 +		}
 +	})
++	t.Run("security challenge returns immediately without becoming empty search", func(t *testing.T) {
++		p := newPage(t, `document.body.textContent='fixture';`)
++		router := p.HijackRequests()
++		router.MustAdd("https://www.xiaohongshu.com/*", func(h *rod.Hijack) { h.Response.SetBody("<body>安全验证</body>") })
++		go router.Run()
++		defer router.Stop()
++		p.MustNavigate("https://www.xiaohongshu.com/website-login/captcha")
++		if err := waitSearchData(p.Timeout(time.Second)); !errors.Is(err, ErrSecurityVerification) {
++			t.Fatal("security page was not distinguished", err)
++		}
++	})
 +	t.Run("cancel loading search", func(t *testing.T) {
 +		p := newPage(t, `window.__INITIAL_STATE__={search:{state:{value:'loading'},feeds:{value:[]}}};`)
 +		ctx, cancel := context.WithCancel(context.Background())
@@ -153,4 +291,255 @@ index 0000000..4ca57d7
 +			t.Fatal("cancellation was lost")
 +		}
 +	})
++}
+diff --git a/security_station.go b/security_station.go
+new file mode 100644
+--- /dev/null
++++ b/security_station.go
+@@ -0,0 +1,201 @@
++package main
++
++// HDU Station settings-only security challenge. Keep the exact browser which
++// reached the challenge; never replace it with a login QR or expose its URL.
++import (
++	"context"
++	"crypto/rand"
++	"encoding/hex"
++	"errors"
++	"sync"
++	"time"
++
++	"github.com/gin-gonic/gin"
++	"github.com/go-rod/rod"
++	"github.com/xpzouying/xiaohongshu-mcp/xiaohongshu"
++)
++
++type securitySession struct {
++	mu         sync.Mutex
++	id, status string
++	page       *rod.Page
++	close      func()
++	expires    time.Time
++}
++type securityResult struct {
++	ID        string `json:"id"`
++	Status    string `json:"status"`
++	Image     string `json:"image,omitempty"`
++	ExpiresAt int64  `json:"expiresAt,omitempty"`
++}
++
++func (s *securitySession) required() bool {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	return s.status != "" && s.status != "ready"
++}
++func (s *securitySession) closeLocked() {
++	if s.close != nil {
++		s.close()
++		s.close = nil
++		s.page = nil
++	}
++}
++func (s *securitySession) clear() {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	s.closeLocked()
++	s.status = ""
++	s.id = ""
++}
++func (s *securitySession) retain(p *rod.Page, close func()) bool {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	if s.status == "waiting" && time.Now().Before(s.expires) {
++		return false
++	}
++	s.closeLocked()
++	var nonce [16]byte
++	if _, err := rand.Read(nonce[:]); err != nil {
++		return false
++	}
++	s.id = hex.EncodeToString(nonce[:])
++	s.status = "waiting"
++	s.page = p.Context(context.Background())
++	s.close = close
++	// The website says its QR expires after one minute. Use a shorter local TTL.
++	s.expires = time.Now().Add(50 * time.Second)
++	id := s.id
++	time.AfterFunc(50*time.Second, func() {
++		s.mu.Lock()
++		defer s.mu.Unlock()
++		if s.id == id && s.status == "waiting" {
++			s.status = "expired"
++			s.closeLocked()
++		}
++	})
++	return true
++}
++func (s *securitySession) resultLocked() securityResult {
++	return securityResult{ID: s.id, Status: s.status, ExpiresAt: s.expires.UnixMilli()}
++}
++func (s *XiaohongshuService) securityQR(ctx context.Context) (securityResult, error) {
++	v := &s.security
++	v.mu.Lock()
++	active := v.status == "waiting" && time.Until(v.expires) > 10*time.Second
++	if !active {
++		v.closeLocked()
++		v.status = ""
++		v.id = ""
++	}
++	v.mu.Unlock()
++	if !active {
++		// Probe the actual read operation, not the home-page login indicator.
++		_, err := s.SearchFeeds(ctx, "杭电 选课")
++		if err == nil {
++			return securityResult{Status: "ready"}, nil
++		}
++		if !errors.Is(err, xiaohongshu.ErrSecurityVerification) {
++			return securityResult{}, err
++		}
++	}
++	v.mu.Lock()
++	defer v.mu.Unlock()
++	if v.page == nil {
++		return securityResult{Status: "expired"}, nil
++	}
++	page := v.page.Context(ctx).Timeout(8 * time.Second)
++	// Return only the site's own QR data image; no page URL or account data.
++	el, err := page.Element("img.qrcode-img")
++	if err != nil {
++		return securityResult{}, errors.New("安全验证二维码暂未加载")
++	}
++	src, err := el.Attribute("src")
++	if err != nil || src == nil {
++		return securityResult{}, errors.New("安全验证二维码暂未加载")
++	}
++	result := v.resultLocked()
++	result.Image = *src
++	return result, nil
++}
++func (s *XiaohongshuService) securityPoll(ctx context.Context, id string) (securityResult, error) {
++	v := &s.security
++	v.mu.Lock()
++	defer v.mu.Unlock()
++	if id == "" || id != v.id {
++		return securityResult{Status: "cancelled"}, nil
++	}
++	if v.status != "waiting" {
++		return v.resultLocked(), nil
++	}
++	if time.Now().After(v.expires) {
++		v.status = "expired"
++		v.closeLocked()
++		return v.resultLocked(), nil
++	}
++	page := v.page.Context(ctx).Timeout(8 * time.Second)
++	state, err := page.Eval(`() => ({captcha:location.pathname === '/website-login/captcha', passed:/验证成功/.test(document.body?.innerText || '')})`)
++	if err != nil {
++		return securityResult{}, errors.New("暂时无法检查安全验证")
++	}
++	if state.Value.Get("captcha").Bool() && !state.Value.Get("passed").Bool() {
++		return v.resultLocked(), nil
++	}
++	// A QR scan alone is insufficient: require a real successful search before
++	// persisting cookies or advertising recovery.
++	_, err = xiaohongshu.NewSearchAction(v.page).Search(ctx, "杭电 选课")
++	if errors.Is(err, xiaohongshu.ErrSecurityVerification) {
++		v.status = "expired"
++		v.closeLocked()
++		return v.resultLocked(), nil
++	}
++	if err != nil {
++		return securityResult{}, errors.New("验证后搜索仍不可用，请稍后重试")
++	}
++	if err = saveCookies(v.page.Context(ctx)); err != nil {
++		return securityResult{}, errors.New("无法保存验证状态")
++	}
++	v.status = "ready"
++	v.closeLocked()
++	return v.resultLocked(), nil
++}
++func (s *AppServer) securityQRHandler(c *gin.Context) {
++	result, err := s.xiaohongshuService.securityQR(c.Request.Context())
++	if err != nil {
++		respondError(c, 503, "SECURITY_QR_UNAVAILABLE", "无法准备安全验证二维码", nil)
++		return
++	}
++	respondSuccess(c, result, "安全验证")
++}
++func (s *AppServer) securityPollHandler(c *gin.Context) {
++	var req struct {
++		ID string `json:"id"`
++	}
++	if c.ShouldBindJSON(&req) != nil || req.ID == "" {
++		respondError(c, 400, "INVALID_REQUEST", "缺少验证会话", nil)
++		return
++	}
++	result, err := s.xiaohongshuService.securityPoll(c.Request.Context(), req.ID)
++	if err != nil {
++		respondError(c, 503, "SECURITY_CHECK_FAILED", "验证后搜索仍不可用，请稍后重试", nil)
++		return
++	}
++	respondSuccess(c, result, "安全验证状态")
++}
++func (s *AppServer) securityCancelHandler(c *gin.Context) {
++	var req struct {
++		ID string `json:"id"`
++	}
++	if c.ShouldBindJSON(&req) != nil || req.ID == "" {
++		respondError(c, 400, "INVALID_REQUEST", "缺少验证会话", nil)
++		return
++	}
++	v := &s.xiaohongshuService.security
++	v.mu.Lock()
++	if req.ID == v.id && v.status == "waiting" {
++		v.status = "expired"
++		v.closeLocked()
++	}
++	v.mu.Unlock()
++	respondSuccess(c, struct{}{}, "已停止等待")
++}
+diff --git a/security_station_test.go b/security_station_test.go
+new file mode 100644
+--- /dev/null
++++ b/security_station_test.go
+@@ -0,0 +1,40 @@
++package main
++
++import (
++	"context"
++
++	"testing"
++	"time"
++)
++
++func TestSecurityExpiryAndStaleSessionCannotAuthorize(t *testing.T) {
++	service := &XiaohongshuService{}
++	closed := 0
++	service.security.id = "old"
++	service.security.status = "waiting"
++	service.security.close = func() { closed++ }
++	oldID := service.security.id
++	if !service.security.required() {
++		t.Fatal("challenge did not block searches")
++	}
++	service.security.expires = time.Now().Add(-time.Second)
++	result, err := service.securityPoll(context.Background(), oldID)
++	if err != nil || result.Status != "expired" || closed != 1 {
++		t.Fatal("expired browser was not closed", result, err, closed)
++	}
++	if !service.security.required() {
++		t.Fatal("expiration incorrectly restored search")
++	}
++	service.security.id = "new"
++	service.security.status = "waiting"
++	service.security.expires = time.Now().Add(time.Minute)
++	service.security.close = func() { closed++ }
++	result, err = service.securityPoll(context.Background(), oldID)
++	if err != nil || result.Status != "cancelled" || closed != 1 {
++		t.Fatal("stale poll changed new session")
++	}
++	service.security.clear()
++	if service.security.required() || closed != 2 {
++		t.Fatal("clear left a browser or challenge")
++	}
 +}

@@ -96,7 +96,8 @@ func (c *XiaohongshuClient) Status(ctx context.Context) string {
 		return "disabled"
 	}
 	var data struct {
-		LoggedIn *bool `json:"is_logged_in"`
+		LoggedIn             *bool `json:"is_logged_in"`
+		VerificationRequired bool  `json:"verification_required"`
 	}
 	err := c.request(ctx, "/api/v1/login/status", nil, &data)
 	if errors.Is(err, errSourceAuth) {
@@ -104,6 +105,9 @@ func (c *XiaohongshuClient) Status(ctx context.Context) string {
 	}
 	if err != nil || data.LoggedIn == nil {
 		return "unavailable"
+	}
+	if data.VerificationRequired {
+		return "verification_required"
 	}
 	if !*data.LoggedIn {
 		return "logged_out"

@@ -33,6 +33,7 @@ func recordXiaohongshuRequest(root, path string, attempt int, start time.Time, e
 			{errSourceTimeout, "timeout"}, {errSourceAuth, "auth_failed"},
 			{errSourceRateLimit, "rate_limited"}, {errSourceServer, "server_error"},
 			{errSourceResponse, "invalid_response"},
+			{errSourceVerification, "verification_required"},
 		} {
 			if errors.Is(err, kind.err) {
 				outcome = kind.name

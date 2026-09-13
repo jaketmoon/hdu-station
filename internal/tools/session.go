@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -93,6 +94,9 @@ func (s *Session) checkConnections(ctx context.Context) {
 }
 
 func disconnectedSource(name, status string) string {
+	if status == "verification_required" {
+		return errSourceVerification.Error()
+	}
 	if status == "logged_out" || status == "auth_failed" {
 		return name + "未登录，本轮已跳过；可继续使用其他已连接来源。"
 	}
@@ -182,6 +186,9 @@ func (s *Session) Search(ctx context.Context, in SearchInput) (SearchResult, err
 		if err != nil {
 			result.Warnings = append(result.Warnings, err.Error())
 			s.connections[source.id] = "unavailable"
+			if errors.Is(err, errSourceVerification) {
+				s.connections[source.id] = "verification_required"
+			}
 		}
 		result.Warnings = append(result.Warnings, found.Warnings...)
 		seen := map[string]bool{}
@@ -259,6 +266,9 @@ func (s *Session) Read(ctx context.Context, in ReadInput) (ReadResult, error) {
 		if err != nil {
 			result.Warnings = append(result.Warnings, err.Error())
 			s.connections[p.Source] = "unavailable"
+			if errors.Is(err, errSourceVerification) {
+				s.connections[p.Source] = "verification_required"
+			}
 			continue
 		}
 		s.reads[id] = p

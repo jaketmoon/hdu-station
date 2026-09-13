@@ -60,6 +60,7 @@ export type CampusLogin = {
 };
 export type SourceConnection = { enabled: boolean; status: string };
 export type SourceLogin = {
+  kind?: "verification";
   id: string;
   status: string;
   image?: string;
@@ -100,6 +101,7 @@ type Bindings = {
     enabled: boolean,
   ): Promise<SourceConnection>;
   BeginSourceLogin(source: LoginSource): Promise<SourceLogin>;
+  BeginSourceVerification(): Promise<SourceLogin>;
   PollSourceLogin(id: string): Promise<SourceLogin>;
   CancelSourceLogin(id: string): Promise<void>;
   ClearSourceCredentials(source: LoginSource): Promise<SourceConnection>;
@@ -139,6 +141,7 @@ export const api = {
   enableSource: (source: LoginSource, enabled: boolean) =>
     bindings().SetSourceEnabled(source, enabled),
   beginLogin: (source: LoginSource) => bindings().BeginSourceLogin(source),
+  beginVerification: () => bindings().BeginSourceVerification(),
   pollLogin: (id: string) => bindings().PollSourceLogin(id),
   cancelLogin: (id: string) => bindings().CancelSourceLogin(id),
   clearSource: (source: LoginSource) =>

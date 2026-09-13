@@ -21,6 +21,7 @@ type SourceLogin struct {
 	tools.LoginChallenge
 }
 type sourceLoginSession struct {
+	verificationID     string
 	id, source, status string
 	cfg                config.Sources
 	ctx                context.Context
@@ -84,6 +85,7 @@ func (a *App) cancelSourceLogin(source string) {
 	for _, login := range cancelled {
 		login.poll.Lock()
 		login.poll.Unlock()
+		a.cancelVerification(login)
 	}
 }
 func (a *App) SetSourceEnabled(source string, enabled bool) (SourceConnection, error) {
@@ -183,7 +185,12 @@ func (a *App) PollSourceLogin(id string) (SourceLogin, error) {
 		status, err = a.client.CompleteLogin(login.ctx)
 	} else {
 		ctx, cancel := context.WithTimeout(login.ctx, 25*time.Second)
-		status = tools.NewXiaohongshuClient(login.cfg.Xiaohongshu, a.root).Status(ctx)
+		client := tools.NewXiaohongshuClient(login.cfg.Xiaohongshu, a.root)
+		if login.verificationID != "" {
+			status, err = client.PollVerification(ctx, login.verificationID)
+		} else {
+			status = client.Status(ctx)
+		}
 		cancel()
 		switch status {
 		case "logged_out", "unavailable":
@@ -223,6 +230,7 @@ func (a *App) CancelSourceLogin(id string) {
 	if login != nil {
 		login.poll.Lock()
 		login.poll.Unlock()
+		a.cancelVerification(login)
 	}
 }
 func (a *App) ClearSourceCredentials(source string) (SourceConnection, error) {

@@ -15,6 +15,7 @@ vi.mock("./api", () => ({
     checkSource: vi.fn(),
     enableSource: vi.fn(),
     beginLogin: vi.fn(),
+    beginVerification: vi.fn(),
     pollLogin: vi.fn(),
     cancelLogin: vi.fn(),
     clearSource: vi.fn(),
@@ -219,4 +220,54 @@ describe("source account settings", () => {
     expect(screen.getByRole("button", { name: "重新连接" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "清除登录凭证" })).toBeDisabled();
   });
+});
+
+it("shows the security QR without resetting login and waits for search recovery", async () => {
+  let complete!: (value: SourceLogin) => void;
+  vi.mocked(api.beginVerification).mockResolvedValue({
+    id: "security-1",
+    kind: "verification",
+    status: "waiting",
+    image: png,
+    expiresAt: Date.now() + 45000,
+  });
+  vi.mocked(api.pollLogin).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  render(<Harness />);
+  expand();
+  fireEvent.click(screen.getByRole("button", { name: "安全验证" }));
+  await screen.findByRole("img", { name: "小红书安全验证二维码" });
+  expect(api.beginLogin).not.toHaveBeenCalled();
+  expect(api.clearSource).not.toHaveBeenCalled();
+  expect(screen.getByText("等待扫码验证身份")).toBeInTheDocument();
+  expect(screen.queryByText("已连接")).not.toBeInTheDocument();
+  await waitFor(() => expect(api.pollLogin).toHaveBeenCalledWith("security-1"));
+  await act(async () => complete({ id: "security-1", status: "ready" }));
+  await screen.findByText("安全验证已通过，已确认搜索恢复可用。");
+  expect(screen.queryByRole("img")).not.toBeInTheDocument();
+});
+
+it("keeps the verification requirement when the security QR expires", async () => {
+  vi.mocked(api.beginVerification).mockResolvedValue({
+    id: "security-1",
+    kind: "verification",
+    status: "waiting",
+    image: png,
+    expiresAt: Date.now() + 45000,
+  });
+  vi.mocked(api.pollLogin).mockResolvedValue({
+    id: "security-1",
+    status: "expired",
+  });
+  render(<Harness />);
+  expand();
+  fireEvent.click(screen.getByRole("button", { name: "安全验证" }));
+  await screen.findByText("二维码已过期");
+  expect(screen.getByText("需要安全验证")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "安全验证" })).toBeEnabled();
+  expect(screen.queryByRole("img")).not.toBeInTheDocument();
 });
