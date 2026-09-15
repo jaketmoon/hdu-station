@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"io/fs"
 	"log"
 
 	"github.com/wailsapp/wails/v2"
@@ -19,6 +20,12 @@ func main() {
 		return
 	}
 
+	frontendAssets, err := fs.Sub(assets, "frontend/dist")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	_, background, _ := startupPalette(app.savedTheme())
 	err = wails.Run(&options.App{
 		Title:     "HDU Station",
 		Width:     1180,
@@ -26,9 +33,9 @@ func main() {
 		MinWidth:  380,
 		MinHeight: 560,
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets: themeAssets{FS: frontendAssets, theme: app.savedTheme},
 		},
-		BackgroundColour: &options.RGBA{R: 14, G: 13, B: 21, A: 1},
+		BackgroundColour: &background,
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		Bind: []interface{}{

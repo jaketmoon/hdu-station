@@ -17,7 +17,7 @@ import {
 } from "./api";
 import { Icon, type IconName } from "./Icon";
 import { TerminalGreeting, Dialogue, useReducedMotion } from "./Dialogue";
-import { NightScene } from "./NightScene";
+import { CampusGateScene } from "./CampusGateScene";
 import { SettingsDialog } from "./SettingsDialog";
 
 const suggestions: {
@@ -47,11 +47,12 @@ const suggestions: {
   },
 ];
 const maxConcurrentConversations = 10;
-const themeOrder: ColorTheme[] = ["teal", "violet", "porcelain"];
+const themeOrder: ColorTheme[] = ["harvest", "porcelain", "violet", "teal"];
 const themeNames: Record<ColorTheme, string> = {
   teal: "青蓝琥珀",
   violet: "灰紫青绿",
   porcelain: "雾白青瓷",
+  harvest: "暖阳田园",
 };
 type Active = {
   requestId: string;
@@ -87,13 +88,23 @@ export default function App() {
   const [appearanceError, setAppearanceError] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState("");
   const systemReduced = useReducedMotion();
+  const [startupTheme] = useState<ColorTheme>(() => {
+    const saved = document.documentElement.dataset.theme;
+    return saved === "teal" || saved === "violet" || saved === "porcelain"
+      ? saved
+      : "harvest";
+  });
   const appearance = settings?.appearance ?? {
     instantText: false,
+    theme: startupTheme,
   };
   const theme =
-    appearance.theme === "violet" || appearance.theme === "porcelain"
+    appearance.theme === "teal" ||
+    appearance.theme === "violet" ||
+    appearance.theme === "porcelain" ||
+    appearance.theme === "harvest"
       ? appearance.theme
-      : "teal";
+      : "harvest";
   const nextTheme =
     themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length];
   const themeName = themeNames[theme];
@@ -660,7 +671,7 @@ export default function App() {
             {welcome ? (
               <section className="welcome">
                 <div className="hero-scene">
-                  <NightScene />
+                  <CampusGateScene pastoral={theme === "harvest"} />
                   <div className="hero-copy">
                     <TerminalGreeting
                       reduced={systemReduced || appearance.instantText}

@@ -103,7 +103,7 @@ func TestRemovedEffectsPreferenceKeepsExistingConfigReadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, err := Load(root)
-	if err != nil || !cfg.Appearance.InstantText || cfg.Appearance.Theme != "teal" {
+	if err != nil || !cfg.Appearance.InstantText || cfg.Appearance.Theme != "harvest" {
 		t.Fatal("removing effects broke the existing typing preference")
 	}
 	if err := Save(root, cfg); err != nil {
@@ -117,10 +117,10 @@ func TestRemovedEffectsPreferenceKeepsExistingConfigReadable(t *testing.T) {
 
 func TestThemeDefaultsAndSavedChoices(t *testing.T) {
 	root := t.TempDir()
-	if Default().Appearance.Theme != "teal" {
-		t.Fatal("new installations should default to teal")
+	if Default().Appearance.Theme != "harvest" {
+		t.Fatal("new installations should default to harvest")
 	}
-	for _, theme := range []string{"", "teal", "violet", "porcelain"} {
+	for _, theme := range []string{"", "teal", "violet", "porcelain", "harvest"} {
 		cfg := Default()
 		cfg.Appearance = Appearance{InstantText: true, Theme: theme}
 		if err := Save(root, cfg); err != nil {
@@ -128,7 +128,7 @@ func TestThemeDefaultsAndSavedChoices(t *testing.T) {
 		}
 		want := theme
 		if want == "" {
-			want = "teal"
+			want = "harvest"
 		}
 		loaded, err := Load(root)
 		if err != nil || loaded.Appearance.Theme != want || !loaded.Appearance.InstantText {

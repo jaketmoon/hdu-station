@@ -95,7 +95,7 @@ func (s Sources) Validate() error {
 }
 
 func Default() Config {
-	return Config{Version: 1, Model: Model{BaseURL: "https://api.deepseek.com", Name: "deepseek-flash"}, Sources: Sources{Xiaohongshu: Xiaohongshu{BaseURL: DefaultXiaohongshuURL}}, Appearance: Appearance{Theme: "teal"}}
+	return Config{Version: 1, Model: Model{BaseURL: "https://api.deepseek.com", Name: "deepseek-flash"}, Sources: Sources{Xiaohongshu: Xiaohongshu{BaseURL: DefaultXiaohongshuURL}}, Appearance: Appearance{Theme: "harvest"}}
 }
 func Root() (string, error) {
 	if root := os.Getenv("HDU_STATION_DATA_ROOT"); root != "" {
@@ -111,11 +111,11 @@ func (c Config) Validate() error {
 	if c.Version != 1 {
 		return errors.New("配置版本不受支持，请使用对应版本的应用")
 	}
-	// An absent theme uses the default blue/amber palette.
+	// An absent theme uses the default warm pastoral palette.
 	switch c.Appearance.Theme {
-	case "", "violet", "teal", "porcelain":
+	case "", "violet", "teal", "porcelain", "harvest":
 	default:
-		return errors.New("请选择青蓝琥珀、灰紫青绿或雾白青瓷配色")
+		return errors.New("请选择青蓝琥珀、灰紫青绿、雾白青瓷或暖阳田园配色")
 	}
 	u, err := url.Parse(c.Model.BaseURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -154,7 +154,7 @@ func Load(root string) (Config, error) {
 		return Config{}, errors.New("本机配置格式不正确")
 	}
 	if c.Appearance.Theme == "" {
-		c.Appearance.Theme = "teal"
+		c.Appearance.Theme = "harvest"
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err

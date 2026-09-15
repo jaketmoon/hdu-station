@@ -29,7 +29,7 @@ export type Settings = {
     status: string;
   };
 };
-export type ColorTheme = "teal" | "violet" | "porcelain";
+export type ColorTheme = "teal" | "violet" | "porcelain" | "harvest";
 export type Appearance = { instantText: boolean; theme?: ColorTheme };
 export type SettingsInput = {
   baseURL: string;

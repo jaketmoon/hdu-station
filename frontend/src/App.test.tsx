@@ -84,12 +84,26 @@ beforeEach(() => {
 });
 
 describe("course assistant", () => {
+  it("keeps the host startup theme while saved settings are loading", async () => {
+    document.documentElement.dataset.theme = "teal";
+    let resolveSettings!: (value: Awaited<ReturnType<typeof api.settings>>) => void;
+    const saved = await api.settings();
+    vi.mocked(api.settings).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSettings = resolve;
+    }));
+    render(<App />);
+    await waitFor(() => expect(resolveSettings).toBeDefined());
+    expect(document.documentElement).toHaveAttribute("data-theme", "teal");
+    await act(async () => resolveSettings({ ...saved, appearance: { instantText: false, theme: "teal" } }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "teal");
+  });
+
   it("keeps the current palette on save failure and preserves a streaming answer and draft when retrying", async () => {
     vi.mocked(api.chat).mockReturnValue(new Promise(() => {}));
     vi.mocked(api.appearance).mockRejectedValueOnce(new Error("配色保存失败"));
     render(<App />);
     const themeButton = screen.getByRole("button", {
-      name: "切换为灰紫青绿配色",
+      name: "切换为雾白青瓷配色",
     });
     await waitFor(() => expect(themeButton).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /想选点轻松的/ }));
@@ -107,7 +121,7 @@ describe("course assistant", () => {
     fireEvent.change(input, { target: { value: "下一条问题" } });
     fireEvent.click(themeButton);
     await screen.findByText(/配色保存失败/);
-    expect(document.documentElement).toHaveAttribute("data-theme", "teal");
+    expect(document.documentElement).toHaveAttribute("data-theme", "harvest");
     expect(input).toHaveValue("下一条问题");
     const answer = screen.getByText("正在核对课程");
     expect(answer).toBeVisible();
@@ -121,13 +135,13 @@ describe("course assistant", () => {
     );
     fireEvent.click(themeButton);
     expect(themeButton).toBeDisabled();
-    expect(document.documentElement).toHaveAttribute("data-theme", "teal");
+    expect(document.documentElement).toHaveAttribute("data-theme", "harvest");
     expect(api.appearance).toHaveBeenLastCalledWith({
       instantText: true,
-      theme: "violet",
+      theme: "porcelain",
     });
-    await act(async () => finish({ instantText: true, theme: "violet" }));
-    expect(document.documentElement).toHaveAttribute("data-theme", "violet");
+    await act(async () => finish({ instantText: true, theme: "porcelain" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "porcelain");
     expect(input).toHaveValue("下一条问题");
     expect(screen.getByText("正在核对课程")).toBe(answer);
     expect(screen.queryByText(/配色保存失败/)).not.toBeInTheDocument();

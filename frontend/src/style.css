@@ -503,13 +503,13 @@ p {
   background: var(--panel);
   border-bottom: 1px solid var(--signal-border);
 }
-.night-scene {
+.campus-gate-scene {
   position: absolute;
-  width: 76%;
+  width: 80%;
   height: 100%;
   right: 0;
   bottom: 0;
-  object-fit: cover;
+  pointer-events: none;
 }
 .hero-copy {
   position: relative;
@@ -1718,6 +1718,33 @@ p {
   border-top: 2px solid var(--signal-border);
   border-left: 2px solid var(--signal-border);
 }
+/* Parchment panels and wooden edges for the pastoral palette. */
+:root[data-theme="harvest"] .suggestion {
+  box-shadow:
+    inset 0 0 0 3px #fff4d880,
+    0 2px 0 #c4a47c33;
+}
+:root[data-theme="harvest"] .composer {
+  border-color: var(--accent-border);
+  box-shadow: inset 0 0 0 3px #f0ddb555;
+}
+:root[data-theme="harvest"] .hero-scene {
+  border-color: var(--border);
+  box-shadow:
+    inset 0 2px #fff6df,
+    inset 0 -2px #d4b78680;
+}
+:root[data-theme="harvest"] .hero-corners {
+  border-color: var(--accent-border);
+}
+:root[data-theme="harvest"] .hero-scene::before,
+:root[data-theme="harvest"] .hero-scene::after {
+  display: none;
+}
+:root[data-theme="harvest"] .suggestion::before,
+:root[data-theme="harvest"] .composer::after {
+  border-color: var(--accent-border);
+}
 @media (min-width: 1440px) {
   .terminal-greeting {
     font-size: 36px;
@@ -1768,9 +1795,8 @@ p {
   .suggestion-detail {
     font-size: 9px;
   }
-  .night-scene {
-    width: 80%;
-    right: -30px;
+  .campus-gate-scene {
+    width: 85%;
   }
 }
 @media (max-width: 760px) {
@@ -1841,10 +1867,15 @@ p {
   .hero-scene {
     height: 240px;
   }
-  .night-scene {
-    right: -37px;
-    width: 90%;
-    opacity: 0.83;
+  .campus-gate-scene {
+    width: 100%;
+  }
+  .hero-copy {
+    align-items: flex-start;
+    padding-top: 18px;
+  }
+  .campus-scene-fade {
+    opacity: 0.35;
   }
   .composer-area {
     padding: 8px 23px 13px;
@@ -1907,12 +1938,7 @@ p {
     padding: 17px 19px 22px;
   }
   .hero-scene {
-    height: 226px;
-  }
-  .night-scene {
-    width: 108%;
-    right: -20px;
-    opacity: 0.65;
+    height: 242px;
   }
   .suggestions {
     grid-template-columns: 1fr;

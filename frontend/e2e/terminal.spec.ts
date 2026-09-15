@@ -56,14 +56,21 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("all three palettes persist, default to teal, and keep the light theme readable", async ({
+test("all four palettes persist, default to harvest, and keep light themes readable", async ({
   page,
 }, testInfo) => {
   await page.goto("/");
   const root = page.locator("html");
   const input = page.getByRole("textbox", { name: "选课问题" });
-  await expect(root).toHaveAttribute("data-theme", "teal");
-  await expect(root).toHaveCSS("background-color", "rgb(16, 25, 31)");
+  await expect(root).toHaveAttribute("data-theme", "harvest");
+  await expect(root).toHaveCSS("background-color", "rgb(241, 228, 199)");
+  await expect(page.locator(".campus-gate-scene")).toHaveAttribute(
+    "data-landscape",
+    "pastoral",
+  );
+  await page.getByRole("button", { name: "切换为雾白青瓷配色" }).click();
+  await expect(root).toHaveAttribute("data-theme", "porcelain");
+  await expect(root).toHaveCSS("background-color", "rgb(233, 237, 231)");
   await input.fill("帮我找周五没早八的专业选修");
   const toggle = page.getByRole("button", { name: "切换为灰紫青绿配色" });
   await expect(toggle).toBeEnabled();
@@ -74,6 +81,7 @@ test("all three palettes persist, default to teal, and keep the light theme read
   await expect(input).toHaveValue("帮我找周五没早八的专业选修");
   await expect(page.locator(".greeting-glyph.is-revealed")).toHaveCount(13);
   await page.screenshot({
+    animations: "disabled",
     path: `test-results/${testInfo.project.name}-violet-theme.png`,
   });
 
@@ -90,18 +98,23 @@ test("all three palettes persist, default to teal, and keep the light theme read
   await page.reload();
   await expect(root).toHaveAttribute("data-theme", "violet");
   await expect(page.locator(".terminal-greeting")).toHaveClass(/instant/);
+  await page.getByRole("button", { name: "切换为青蓝琥珀配色" }).click();
+  await expect(root).toHaveAttribute("data-theme", "teal");
+  await page.getByRole("button", { name: "切换为暖阳田园配色" }).click();
+  await expect(root).toHaveAttribute("data-theme", "harvest");
   await page.getByRole("button", { name: "切换为雾白青瓷配色" }).click();
   await expect(root).toHaveAttribute("data-theme", "porcelain");
   await page.reload();
   await expect(root).toHaveAttribute("data-theme", "porcelain");
   await expect(root).toHaveCSS("background-color", "rgb(233, 237, 231)");
   await expect(root).toHaveCSS("color-scheme", "light");
-  await expect(page.locator("#night-sky stop").first()).toHaveCSS(
+  await expect(page.locator("#campus-sky stop").nth(1)).toHaveCSS(
     "stop-color",
     "rgb(222, 230, 218)",
   );
   await expect(page.locator(".terminal-greeting")).toHaveClass(/instant/);
   await page.screenshot({
+    animations: "disabled",
     path: `test-results/${testInfo.project.name}-porcelain-theme.png`,
   });
   await page.getByTitle("查看助手设置").click();
@@ -114,6 +127,7 @@ test("all three palettes persist, default to teal, and keep the light theme read
     "light",
   );
   await page.screenshot({
+    animations: "disabled",
     path: `test-results/${testInfo.project.name}-porcelain-settings.png`,
   });
   await page.keyboard.press("Escape");
@@ -136,15 +150,56 @@ test("all three palettes persist, default to teal, and keep the light theme read
   await page.getByRole("button", { name: "通讯甲", exact: true }).click();
   await expect(page.getByRole("table")).toBeVisible();
   await page.screenshot({
+    animations: "disabled",
     path: `test-results/${testInfo.project.name}-porcelain-answer.png`,
   });
+  await page.getByRole("button", { name: "切换为灰紫青绿配色" }).click();
+  await page.getByRole("button", { name: "切换为青蓝琥珀配色" }).click();
+  await page.getByRole("button", { name: "切换为暖阳田园配色" }).click();
+  await expect(root).toHaveAttribute("data-theme", "harvest");
+  await expect(root).toHaveCSS("background-color", "rgb(241, 228, 199)");
+  await expect(root).toHaveCSS("color-scheme", "light");
+  await expect(page.getByRole("table")).toBeVisible();
+  await page.screenshot({
+    animations: "disabled",
+    path: `test-results/${testInfo.project.name}-harvest-answer.png`,
+  });
+  await page.getByTitle("查看助手设置").click();
+  await expect(page.getByRole("dialog")).toHaveCSS(
+    "background-color",
+    "rgb(255, 241, 212)",
+  );
+  await page.screenshot({
+    animations: "disabled",
+    path: `test-results/${testInfo.project.name}-harvest-settings.png`,
+  });
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+k");
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "harvest");
+  await expect(page.locator(".campus-gate-scene")).toHaveAttribute(
+    "data-landscape",
+    "pastoral",
+  );
+  await expect(page.locator(".terminal-greeting")).toHaveClass(/instant/);
+  await page.screenshot({
+    animations: "disabled",
+    path: `test-results/${testInfo.project.name}-harvest-theme.png`,
+  });
+  await page.getByRole("button", { name: "切换为雾白青瓷配色" }).click();
+  await page.getByRole("button", { name: "切换为灰紫青绿配色" }).click();
   await page.getByRole("button", { name: "切换为青蓝琥珀配色" }).click();
   await expect(root).toHaveAttribute("data-theme", "teal");
   await expect(root).toHaveCSS("color-scheme", "dark");
   await page.reload();
   await expect(root).toHaveAttribute("data-theme", "teal");
   await expect(page.locator(".terminal-greeting")).toHaveClass(/instant/);
+  await expect(page.locator(".campus-gate-scene")).toHaveAttribute(
+    "data-landscape",
+    "city",
+  );
   await page.screenshot({
+    animations: "disabled",
     path: `test-results/${testInfo.project.name}-teal-theme.png`,
   });
   expect(
@@ -180,12 +235,12 @@ test("typing preferences persist without VHS controls and respect reduced motion
   await expect(page.locator("body")).not.toContainText(
     /ZERO|收到，特工|发现口碑 ·|行动由你决定|HANGZHOU|NIGHT FREQUENCY|选择一项行动|QUICK OPERATIONS|INPUT READY|输入你的选课指令|换行|✦/i,
   );
-  await expect(page.locator(".night-scene text")).toHaveCount(0);
+  await expect(page.locator(".campus-gate-scene text")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "录像带特效", exact: true }),
   ).toHaveCount(0);
   await expect(page.locator(".crt-overlay, .signal-transition")).toHaveCount(0);
-  await expect(page.locator(".night-scene")).toHaveCSS("filter", "none");
+  await expect(page.locator(".campus-gate-scene")).toHaveCSS("filter", "none");
   await page.getByTitle("查看助手设置").click();
   await page
     .getByRole("dialog")
