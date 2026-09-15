@@ -72,7 +72,7 @@ QQ 和小红书使用同一个可展开来源卡片，折叠时只显示名称�
 
 ## 终端显示
 
-终端皮肤在 React 呈现层提供像素 HUD、逐字对话与情报表格，已移除录像带模式、噪点和特效转场。模型内容和 SQLite 原文不因动画改变；取消、错误、历史读取及系统减少动态效果时直接显示已接收原文。`SaveAppearance` 在配置锁下只修改 `config.yaml` 的 `appearance.instant_text`，允许在生成期间保存，不改写模型与来源设置，不使用 localStorage。实现与参考见 [终端设计记录](iterations/20260915-katana-zero-terminal.md)。
+终端皮肤在 React 呈现层提供像素 HUD、逐字对话与情报表格，已移除录像带模式、噪点和特效转场。右上角按青蓝琥珀（`teal`）、灰紫青绿（`violet`）、雾白青瓷（`porcelain`，浅色）的顺序循环切换。页面、弹窗和 SVG 城市场景共用主题变量，原生控件跟随深浅色模式；新配置与未指定配色的旧配置默认青蓝琥珀，已有明确选择继续保留。浅色参考 [Solarized Light](https://ethanschoonover.com/solarized/) 的柔和底色与分层思路，采用暖灰、墨绿和青瓷色。模型内容和 SQLite 原文不因外观变化改变；取消、错误、历史读取及系统减少动态效果时直接显示已接收原文。`SaveAppearance` 在配置锁下只修改 `config.yaml` 的 `appearance.instant_text` 与 `appearance.theme`，允许在生成期间保存，不改写模型与来源设置，不使用 localStorage；保存失败保留原配色。实现与参考见 [终端设计记录](iterations/20260915-katana-zero-terminal.md)。
 
 ## 本机数据与迁移
 

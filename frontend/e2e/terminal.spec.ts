@@ -56,6 +56,109 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("all three palettes persist, default to teal, and keep the light theme readable", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/");
+  const root = page.locator("html");
+  const input = page.getByRole("textbox", { name: "选课问题" });
+  await expect(root).toHaveAttribute("data-theme", "teal");
+  await expect(root).toHaveCSS("background-color", "rgb(16, 25, 31)");
+  await input.fill("帮我找周五没早八的专业选修");
+  const toggle = page.getByRole("button", { name: "切换为灰紫青绿配色" });
+  await expect(toggle).toBeEnabled();
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(root).toHaveAttribute("data-theme", "violet");
+  await expect(root).toHaveCSS("background-color", "rgb(21, 19, 30)");
+  await expect(input).toHaveValue("帮我找周五没早八的专业选修");
+  await expect(page.locator(".greeting-glyph.is-revealed")).toHaveCount(13);
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-violet-theme.png`,
+  });
+
+  await page.getByTitle("查看助手设置").click();
+  await page
+    .getByRole("dialog")
+    .locator("summary")
+    .filter({ hasText: "显示与动效" })
+    .click();
+  const typing = page.getByRole("switch", { name: "剧情式逐字对话" });
+  await typing.click();
+  await expect(typing).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "violet");
+  await expect(page.locator(".terminal-greeting")).toHaveClass(/instant/);
+  await page.getByRole("button", { name: "切换为雾白青瓷配色" }).click();
+  await expect(root).toHaveAttribute("data-theme", "porcelain");
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "porcelain");
+  await expect(root).toHaveCSS("background-color", "rgb(233, 237, 231)");
+  await expect(root).toHaveCSS("color-scheme", "light");
+  await expect(page.locator("#night-sky stop").first()).toHaveCSS(
+    "stop-color",
+    "rgb(222, 230, 218)",
+  );
+  await expect(page.locator(".terminal-greeting")).toHaveClass(/instant/);
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-porcelain-theme.png`,
+  });
+  await page.getByTitle("查看助手设置").click();
+  await expect(page.getByRole("dialog")).toHaveCSS(
+    "background-color",
+    "rgb(243, 244, 239)",
+  );
+  await expect(page.getByRole("dialog").locator("input").first()).toHaveCSS(
+    "color-scheme",
+    "light",
+  );
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-porcelain-settings.png`,
+  });
+  await page.keyboard.press("Escape");
+
+  await page.evaluate(() => {
+    (window as any).go.main.App.GetMessages = async (id: string) => [
+      {
+        id,
+        conversationId: id,
+        role: "assistant",
+        state: "complete",
+        createdAt: "",
+        content:
+          "可以先了解以下课程，再确认本学期的开课安排。\n\n## 课程情报\n\n| 课程 | 选课前确认 | 参考 |\n| --- | --- | --- |\n| 戏曲鉴赏 | 平时作业与考核方式 | [课程介绍](https://example.com/course) |\n| 中国传统美学导论 | 授课教师与上课时间 | 待核实 |\n\n> 社区经验仅供参考，以教务系统的信息为准。\n\n**下一步**：可以继续核对这些课程与你的课表是否冲突。",
+      },
+    ];
+  });
+  if (testInfo.project.name === "narrow")
+    await page.getByRole("button", { name: "打开历史列表" }).click();
+  await page.getByRole("button", { name: "通讯甲", exact: true }).click();
+  await expect(page.getByRole("table")).toBeVisible();
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-porcelain-answer.png`,
+  });
+  await page.getByRole("button", { name: "切换为青蓝琥珀配色" }).click();
+  await expect(root).toHaveAttribute("data-theme", "teal");
+  await expect(root).toHaveCSS("color-scheme", "dark");
+  await page.reload();
+  await expect(root).toHaveAttribute("data-theme", "teal");
+  await expect(page.locator(".terminal-greeting")).toHaveClass(/instant/);
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-teal-theme.png`,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const bounds = await page.locator(".theme-toggle").boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(
+    page.viewportSize()!.width,
+  );
+});
+
 test("typing preferences persist without VHS controls and respect reduced motion", async ({
   page,
 }) => {

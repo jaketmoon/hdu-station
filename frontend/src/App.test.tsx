@@ -7,7 +7,13 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { api, type Message, type TurnEvent, type TurnResult } from "./api";
+import {
+  api,
+  type Appearance,
+  type Message,
+  type TurnEvent,
+  type TurnResult,
+} from "./api";
 
 vi.mock("./api", () => ({
   api: {
@@ -21,6 +27,7 @@ vi.mock("./api", () => ({
     install: vi.fn(),
     open: vi.fn(),
     copy: vi.fn(),
+    appearance: vi.fn(),
     subscribe: vi.fn(),
   },
   errorText: (error: unknown) => String(error),
@@ -77,6 +84,58 @@ beforeEach(() => {
 });
 
 describe("course assistant", () => {
+  it("keeps the current palette on save failure and preserves a streaming answer and draft when retrying", async () => {
+    vi.mocked(api.chat).mockReturnValue(new Promise(() => {}));
+    vi.mocked(api.appearance).mockRejectedValueOnce(new Error("配色保存失败"));
+    render(<App />);
+    const themeButton = screen.getByRole("button", {
+      name: "切换为灰紫青绿配色",
+    });
+    await waitFor(() => expect(themeButton).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /想选点轻松的/ }));
+    await waitFor(() => expect(api.chat).toHaveBeenCalledTimes(1));
+    const requestId = vi.mocked(api.chat).mock.calls[0][2];
+    act(() =>
+      event({
+        requestId,
+        conversationId: "c1",
+        kind: "delta",
+        text: "正在核对课程",
+      }),
+    );
+    const input = screen.getByRole("textbox", { name: "选课问题" });
+    fireEvent.change(input, { target: { value: "下一条问题" } });
+    fireEvent.click(themeButton);
+    await screen.findByText(/配色保存失败/);
+    expect(document.documentElement).toHaveAttribute("data-theme", "teal");
+    expect(input).toHaveValue("下一条问题");
+    const answer = screen.getByText("正在核对课程");
+    expect(answer).toBeVisible();
+
+    let finish!: (value: Appearance) => void;
+    vi.mocked(api.appearance).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.click(themeButton);
+    expect(themeButton).toBeDisabled();
+    expect(document.documentElement).toHaveAttribute("data-theme", "teal");
+    expect(api.appearance).toHaveBeenLastCalledWith({
+      instantText: true,
+      theme: "violet",
+    });
+    await act(async () => finish({ instantText: true, theme: "violet" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "violet");
+    expect(input).toHaveValue("下一条问题");
+    expect(screen.getByText("正在核对课程")).toBe(answer);
+    expect(screen.queryByText(/配色保存失败/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "停止回答" })).toBeEnabled();
+    expect(api.chat).toHaveBeenCalledTimes(1);
+    expect(api.cancel).not.toHaveBeenCalled();
+  });
+
   it("opens directly into the assistant with three usable prompts", async () => {
     render(<App />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(

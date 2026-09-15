@@ -29,7 +29,8 @@ export type Settings = {
     status: string;
   };
 };
-export type Appearance = { instantText: boolean };
+export type ColorTheme = "teal" | "violet" | "porcelain";
+export type Appearance = { instantText: boolean; theme?: ColorTheme };
 export type SettingsInput = {
   baseURL: string;
   apiKey: string;

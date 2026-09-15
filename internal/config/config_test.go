@@ -103,7 +103,7 @@ func TestRemovedEffectsPreferenceKeepsExistingConfigReadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, err := Load(root)
-	if err != nil || !cfg.Appearance.InstantText {
+	if err != nil || !cfg.Appearance.InstantText || cfg.Appearance.Theme != "teal" {
 		t.Fatal("removing effects broke the existing typing preference")
 	}
 	if err := Save(root, cfg); err != nil {
@@ -112,5 +112,27 @@ func TestRemovedEffectsPreferenceKeepsExistingConfigReadable(t *testing.T) {
 	data, err := os.ReadFile(path)
 	if err != nil || strings.Contains(string(data), "reduce_effects") {
 		t.Fatal("saving retained the removed effects preference")
+	}
+}
+
+func TestThemeDefaultsAndSavedChoices(t *testing.T) {
+	root := t.TempDir()
+	if Default().Appearance.Theme != "teal" {
+		t.Fatal("new installations should default to teal")
+	}
+	for _, theme := range []string{"", "teal", "violet", "porcelain"} {
+		cfg := Default()
+		cfg.Appearance = Appearance{InstantText: true, Theme: theme}
+		if err := Save(root, cfg); err != nil {
+			t.Fatal(err)
+		}
+		want := theme
+		if want == "" {
+			want = "teal"
+		}
+		loaded, err := Load(root)
+		if err != nil || loaded.Appearance.Theme != want || !loaded.Appearance.InstantText {
+			t.Fatal("loading lost the theme choice or typing preference")
+		}
 	}
 }

@@ -11,7 +11,7 @@ func TestAppearanceSavesDuringTurnWithoutChangingCredentials(t *testing.T) {
 	a := testApp(t)
 	before := a.cfg
 	a.active["display-test"] = &activeTurn{}
-	next := config.Appearance{InstantText: true}
+	next := config.Appearance{InstantText: true, Theme: "porcelain"}
 	saved, err := a.SaveAppearance(next)
 	delete(a.active, "display-test")
 	if err != nil || saved != next {
@@ -25,11 +25,27 @@ func TestAppearanceSavesDuringTurnWithoutChangingCredentials(t *testing.T) {
 
 func TestAppearanceFailurePreservesCurrentPreferences(t *testing.T) {
 	a := testApp(t)
+	before := a.cfg.Appearance
 	root := a.root
 	a.root = filepath.Join(root, "config.yaml")
-	_, err := a.SaveAppearance(config.Appearance{InstantText: true})
+	_, err := a.SaveAppearance(config.Appearance{InstantText: true, Theme: "porcelain"})
 	a.root = root
-	if err == nil || a.cfg.Appearance.InstantText {
+	if err == nil || a.cfg.Appearance != before {
 		t.Fatal("failed display save changed the in-memory preference")
+	}
+}
+
+func TestInvalidThemePreservesSavedAppearance(t *testing.T) {
+	a := testApp(t)
+	before := config.Appearance{InstantText: true, Theme: "violet"}
+	if _, err := a.SaveAppearance(before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SaveAppearance(config.Appearance{Theme: "unknown"}); err == nil {
+		t.Fatal("unsupported theme accepted")
+	}
+	loaded, err := config.Load(a.root)
+	if err != nil || loaded.Appearance != before || a.cfg.Appearance != before {
+		t.Fatal("invalid theme changed the saved appearance")
 	}
 }

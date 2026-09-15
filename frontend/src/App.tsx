@@ -13,6 +13,7 @@ import {
   type Settings,
   type TurnEvent,
   type Appearance,
+  type ColorTheme,
 } from "./api";
 import { Icon, type IconName } from "./Icon";
 import { TerminalGreeting, Dialogue, useReducedMotion } from "./Dialogue";
@@ -46,6 +47,12 @@ const suggestions: {
   },
 ];
 const maxConcurrentConversations = 10;
+const themeOrder: ColorTheme[] = ["teal", "violet", "porcelain"];
+const themeNames: Record<ColorTheme, string> = {
+  teal: "青蓝琥珀",
+  violet: "灰紫青绿",
+  porcelain: "雾白青瓷",
+};
 type Active = {
   requestId: string;
   conversationId: string;
@@ -83,6 +90,20 @@ export default function App() {
   const appearance = settings?.appearance ?? {
     instantText: false,
   };
+  const theme =
+    appearance.theme === "violet" || appearance.theme === "porcelain"
+      ? appearance.theme
+      : "teal";
+  const nextTheme =
+    themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length];
+  const themeName = themeNames[theme];
+  const nextThemeName = themeNames[nextTheme];
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, [theme]);
   const sidebar = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const timeline = useRef<HTMLDivElement>(null);
@@ -289,6 +310,7 @@ export default function App() {
   async function saveAppearance(next: Appearance) {
     if (savingAppearance) return;
     setSavingAppearance(true);
+    setError((current) => (current === appearanceError ? "" : current));
     setAppearanceError("");
     try {
       const saved = await api.appearance(next);
@@ -598,6 +620,21 @@ export default function App() {
                 className={`status-dot ${settings?.hasAPIKey ? "online" : ""}`}
               />
               <span>DeepSeek V4.1 Flash</span>
+            </button>
+            <button
+              className="theme-toggle"
+              title={`当前：${themeName}；点击切换为${nextThemeName}`}
+              aria-label={`切换为${nextThemeName}配色`}
+              disabled={!settings || savingAppearance}
+              onClick={() =>
+                saveAppearance({ ...appearance, theme: nextTheme })
+              }
+            >
+              <span className="theme-swatch" aria-hidden="true">
+                <i />
+                <i />
+              </span>
+              <span className="theme-name">{themeName}</span>
             </button>
           </div>
         </header>
