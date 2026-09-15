@@ -70,6 +70,10 @@ QQ 和小红书使用同一个可展开来源卡片，折叠时只显示名称�
 
 校园账户数据原子保存至 `campus-auth.yaml`，保留稳定设备 ID、实际批准 scope、期限和 PAT。清除先提交本机空凭证，再通过 `DELETE /cli/tokens/current` 撤销当前 Station 授权；远端失败不会恢复本机凭证。重新授权只在成功保存新 PAT 后撤销 Station 管理的旧 PAT。历史 `campus_key` 仅在尚无新授权文件时兼容读取，不会被自动远端撤销；完成网页授权或本机退出后不会回退到旧令牌。
 
+## 终端显示
+
+终端皮肤在 React 呈现层提供像素 HUD、逐字对话与情报表格，已移除录像带模式、噪点和特效转场。模型内容和 SQLite 原文不因动画改变；取消、错误、历史读取及系统减少动态效果时直接显示已接收原文。`SaveAppearance` 在配置锁下只修改 `config.yaml` 的 `appearance.instant_text`，允许在生成期间保存，不改写模型与来源设置，不使用 localStorage。实现与参考见 [终端设计记录](iterations/20260915-katana-zero-terminal.md)。
+
 ## 本机数据与迁移
 
 新版使用独立应用数据根目录 `HDU Station Course`，避免覆盖旧版配置、数据库和技能。在 macOS 下为 `~/Library/Application Support/HDU Station Course`。开发或测试可显式设置 `HDU_STATION_DATA_ROOT`。

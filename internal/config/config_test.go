@@ -94,3 +94,23 @@ func TestCampusPATValidationPreservesPreviousConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovedEffectsPreferenceKeepsExistingConfigReadable(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.yaml")
+	legacy := "version: 1\nmodel:\n  base_url: https://api.deepseek.com\n  name: deepseek-flash\nappearance:\n  reduce_effects: true\n  instant_text: true\n"
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil || !cfg.Appearance.InstantText {
+		t.Fatal("removing effects broke the existing typing preference")
+	}
+	if err := Save(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(data), "reduce_effects") {
+		t.Fatal("saving retained the removed effects preference")
+	}
+}

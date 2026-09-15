@@ -21,10 +21,16 @@ type Model struct {
 	Name    string `yaml:"name"`
 }
 type Config struct {
-	Version   int     `yaml:"version"`
-	Model     Model   `yaml:"model"`
-	CampusKey string  `yaml:"campus_key,omitempty" json:"-"`
-	Sources   Sources `yaml:"sources,omitempty"`
+	Version    int        `yaml:"version"`
+	Model      Model      `yaml:"model"`
+	CampusKey  string     `yaml:"campus_key,omitempty" json:"-"`
+	Sources    Sources    `yaml:"sources,omitempty"`
+	Appearance Appearance `yaml:"appearance,omitempty"`
+}
+
+// Existing installs reveal dialogue gradually unless instant text is selected.
+type Appearance struct {
+	InstantText bool `yaml:"instant_text" json:"instantText"`
 }
 
 type Sources struct {

@@ -1,4 +1,8 @@
 const paths = {
+  terminal: "M3 5h18v14H3zM7 9l3 3-3 3m6 0h4",
+  signal: "M4 18v2m5-7v7m5-12v12m5-17v17",
+  target: "M9 3H3v6m12-6h6v6M3 15v6h6m6 0h6v-6M8 8h8v8H8z",
+  clock: "M12 7v5l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
   book: "M4 4h6a3 3 0 0 1 3 3v14a4 4 0 0 0-4-2H4V4Zm16 0h-4a3 3 0 0 0-3 3m7-3v15h-3a4 4 0 0 0-4 2",
   plus: "M12 5v14M5 12h14",
   chat: "M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2Z",
@@ -24,8 +28,8 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
       fill="none"
       stroke="currentColor"
       strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      strokeLinecap="square"
+      strokeLinejoin="miter"
       aria-hidden="true"
     >
       <path d={paths[name]} />

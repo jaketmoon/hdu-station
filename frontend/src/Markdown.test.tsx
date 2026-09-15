@@ -3,6 +3,30 @@ import { describe, expect, it, vi } from "vitest";
 import { Markdown } from "./Markdown";
 
 describe("Chinese Markdown", () => {
+  it("preserves hard line breaks and separators in received intelligence", () => {
+    const { container } = render(
+      <Markdown
+        text={"第一行  \n第二行\n\n---\n\n下一条情报"}
+        onError={vi.fn()}
+      />,
+    );
+    expect(container.querySelector("br")).not.toBeNull();
+    expect(container.querySelector("hr")).not.toBeNull();
+  });
+  it("keeps a table's horizontal reading position while later text is revealed", () => {
+    const text =
+      "| 课程 | 状态 |\n| --- | --- |\n| 戏曲 | 可选 |\n\n继续接收后续情报。";
+    const onError = vi.fn();
+    const { container, rerender } = render(
+      <Markdown text={text} revealLimit={1} onError={onError} />,
+    );
+    const scroller = container.querySelector(".table-scroll")!;
+    scroller.scrollLeft = 45;
+    rerender(
+      <Markdown text={text} revealLimit={text.length - 2} onError={onError} />,
+    );
+    expect(container.querySelector(".table-scroll")?.scrollLeft).toBe(45);
+  });
   it("renders bold Chinese punctuation without exposing delimiters", () => {
     const { container } = render(
       <Markdown
