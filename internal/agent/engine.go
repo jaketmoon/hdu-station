@@ -56,16 +56,20 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 		return Result{}, err
 	}
 	campus := tools.NewCampusSession(e.Campus, func(text string) { emit(Event{Kind: "status", Text: text}) })
-	offerings, err := utils.InferTool("check_course_offerings", "核实指定课程的开课班级、老师、学分、时间与考核。先完整名称检索，没有精确匹配再查核心词；可用 coreKeywords 指定核心词。模糊候选 candidates 按课程号分组，模型选最接近者（相似时保留多个），将其 courseIDs 传入再次查询或课表筛选。未找到不等于未开课。", recordAction(&actions, "check_course_offerings", campus.CheckOfferings))
+	academicTerm, err := utils.InferTool("get_academic_term", "查询教务当前默认学年学期，直接回答本学期是哪个学期、课程时间按哪个默认学期查。无需课程名或再次确认，不读取本人课表。", recordAction(&actions, "get_academic_term", campus.ReadAcademicTerm))
 	if err != nil {
 		return Result{}, err
 	}
-	fit, err := utils.InferTool("fit_courses_to_schedule", "读取本人完整课表，按全部周次、星期与节次判断候选班级能否放入空闲位置。提供课程名可直接检查开课和冲突；省略课程名只读取课表占用时段。遵守工具计算的 fits/conflict/unknown 等状态，suggestedPlan 才是彼此也无冲突的候选组合。", recordAction(&actions, "fit_courses_to_schedule", campus.FitCourses))
+	offerings, err := utils.InferTool("check_course_offerings", "核实指定课程的开课班级、老师、学分、时间与考核。本学期直接省略学年学期查询，无需追问或再次确认。先完整名称检索，没有精确匹配再查核心词；可用 coreKeywords 指定核心词。模糊候选 candidates 按课程号分组，模型选最接近者（相似时保留多个），将其 courseIDs 传入再次查询或课表筛选。未找到不等于未开课。", recordAction(&actions, "check_course_offerings", campus.CheckOfferings))
+	if err != nil {
+		return Result{}, err
+	}
+	fit, err := utils.InferTool("fit_courses_to_schedule", "读取本人完整课表，按全部周次、星期与节次判断候选班级能否放入空闲位置。提供课程名可直接检查开课和冲突；省略课程名只读取课表占用时段；问某天或时段的忙闲也应传 allowedDays、timeOfDay 或 allowedSections。遵守工具计算的 fits/conflict/unknown 等状态，suggestedPlan 才是彼此也无冲突的候选组合。", recordAction(&actions, "fit_courses_to_schedule", campus.FitCourses))
 	if err != nil {
 		return Result{}, err
 	}
 	campusDisplay := ""
-	show, err := utils.InferTool("show_course_results", "展示本次已读取的课程信息或单独的本人课表占用时段，并结束回答。用户要求按课表筛选时 matchSchedule=true；若尚未读课表会补查。模糊候选可以如实显示；用户要核实具体课程时先选择课程号。可附本轮社区经验摘要，不手写校园事实表。", func(ctx context.Context, in tools.ShowCoursesInput) (map[string]string, error) {
+	show, err := utils.InferTool("show_course_results", "展示本次已读取的课程信息、教务默认学期或单独的本人课表占用时段，并结束回答。用户要求按课表筛选时 matchSchedule=true；若尚未读课表会补查。模糊候选可以如实显示；用户要核实具体课程时先选择课程号。可附本轮社区经验摘要，不手写校园事实表。", func(ctx context.Context, in tools.ShowCoursesInput) (map[string]string, error) {
 		actions = append(actions, "show_course_results")
 		display, err := campus.ShowCourses(ctx, in)
 		if err != nil {
@@ -88,7 +92,7 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	provider := NewProvider(e.Model, func(event Event) {
 		// Official campus facts are rendered from the tool records, so a model
 		// cannot briefly stream a mismatched class/time table before replacement.
-		if campus.Calls > 0 && event.Kind == "delta" {
+		if campus.HasQueryResult() && event.Kind == "delta" {
 			return
 		}
 		citations.consume(event)
@@ -96,7 +100,7 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	provider.completed = func() string { return campusDisplay }
 	provider.completionGap = campus.CompletionGap
 	provider.canUseTools = func() bool { return session.Calls+campus.Calls < 12 }
-	runner, err := react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: provider, MaxStep: 26, ToolsConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{search, read, offerings, fit, show}, ExecuteSequentially: true}})
+	runner, err := react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: provider, MaxStep: 26, ToolsConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{search, read, academicTerm, offerings, fit, show}, ExecuteSequentially: true}})
 	if err != nil {
 		return Result{}, errors.New("无法启动选课助手")
 	}
@@ -132,7 +136,7 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	text := message.Content
 	if campusDisplay != "" {
 		text = campusDisplay
-	} else if campus.Calls > 0 {
+	} else if campus.HasQueryResult() {
 		text = campus.Display()
 	}
 	result.Text = withSourceLinks(resolveCitations(text, citations.sources()), result.Sources)

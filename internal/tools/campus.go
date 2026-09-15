@@ -149,11 +149,12 @@ func (t AcademicTerm) query() url.Values {
 }
 
 type OfferingInput struct {
-	Courses      []string        `json:"courses" jsonschema:"description=本次全部具体课程名（1–12门），追问从上一轮推荐提取，不编造别名"`
-	CoreKeywords []CourseKeyword `json:"coreKeywords,omitempty" jsonschema:"description=可选：为模糊网名提取有辨识度的核心词。工具先查完整名称，没有精确匹配才查核心词；每门最多一个"`
-	CourseIDs    []string        `json:"courseIDs,omitempty" jsonschema:"description=从工具候选中选择最接近的原始课程号；多个近似课程可同时保留。省略时不替模型选择模糊候选，不得编造课程号"`
-	SchoolYear   string          `json:"schoolYear,omitempty" jsonschema:"description=明确学年时传 YYYY-YYYY，必须与 semester 同传；本学期省略由教务配置确定"`
-	Semester     int             `json:"semester,omitempty" jsonschema:"description=学期1/2/3，必须与 schoolYear 同传"`
+	ReplaceCandidates bool            `json:"replaceCandidates,omitempty" jsonschema:"description=仅当用户明确放弃之前候选、只保留本次courses时传true；普通消歧或补查不要传"`
+	Courses           []string        `json:"courses" jsonschema:"description=本次全部具体课程名（1–12门），追问从上一轮推荐提取，不编造别名"`
+	CoreKeywords      []CourseKeyword `json:"coreKeywords,omitempty" jsonschema:"description=可选：为模糊网名提取有辨识度的核心词。工具先查完整名称，没有精确匹配才查核心词；每门最多一个"`
+	CourseIDs         []string        `json:"courseIDs,omitempty" jsonschema:"description=从工具候选中选择最接近的原始课程号；多个近似课程可同时保留。省略时不替模型选择模糊候选，不得编造课程号"`
+	SchoolYear        string          `json:"schoolYear,omitempty" jsonschema:"description=明确学年时传 YYYY-YYYY，必须与 semester 同传；本学期省略由教务配置确定"`
+	Semester          int             `json:"semester,omitempty" jsonschema:"description=学期1/2/3，必须与 schoolYear 同传"`
 }
 type CourseKeyword struct {
 	Course  string `json:"course" jsonschema:"description=对应 courses 中的原始课程名"`
@@ -179,13 +180,14 @@ type Offering struct {
 	TimeComplete bool         `json:"timeComplete"`
 }
 type OfferingQuery struct {
-	Query          string            `json:"query"`
-	Classes        []Offering        `json:"classes"`
-	Candidates     []CourseCandidate `json:"candidates,omitempty"`
-	Searched       []string          `json:"searched"`
-	Partial        bool              `json:"partial"`
-	Warning        string            `json:"warning,omitempty"`
-	NeedsSelection bool              `json:"needsSelection"`
+	Query             string            `json:"query"`
+	Classes           []Offering        `json:"classes"`
+	Candidates        []CourseCandidate `json:"candidates,omitempty"`
+	Searched          []string          `json:"searched"`
+	Partial           bool              `json:"partial"`
+	Warning           string            `json:"warning,omitempty"`
+	NeedsSelection    bool              `json:"needsSelection"`
+	CampusUnconfirmed bool              `json:"campusUnconfirmed,omitempty"`
 }
 type OfferingResult struct {
 	Term       AcademicTerm    `json:"term"`
@@ -207,12 +209,18 @@ type CampusSession struct {
 	schedules          map[AcademicTerm]scheduleResult
 	queries            map[string]OfferingQuery
 	displayPreferences FitCoursesInput
-	lastInput          OfferingInput
 	lastOfferings      *OfferingResult
 	lastFit            *FitCoursesResult
+	lastTermResult     *AcademicTermResult
 	scheduleRequested  bool
 	fitPreferences     FitCoursesInput
 	origins            map[string][]string
+}
+
+// A rejected display call is not a campus query. Failed or empty query
+// responses still count, so their safe diagnostic result can be displayed.
+func (s *CampusSession) HasQueryResult() bool {
+	return s.lastOfferings != nil || s.lastFit != nil || s.lastTermResult != nil
 }
 
 func (s *CampusSession) HasCourseResults() bool {
@@ -222,7 +230,7 @@ func (s *CampusSession) HasCourseResults() bool {
 // Completion validates available records, never expands a user's request into
 // discovery or schedule matching. Unresolved candidates may be shown as such.
 func (s *CampusSession) CanShowCourses() bool {
-	return s.HasCourseResults() || s.lastFit != nil
+	return s.HasCourseResults() || s.lastFit != nil || s.lastTermResult != nil
 }
 func (s *CampusSession) CompletionGap() string {
 	if s.CanShowCourses() {
@@ -338,7 +346,8 @@ func (s *CampusSession) CheckOfferings(ctx context.Context, in OfferingInput) (O
 	ctx, cancel := context.WithTimeout(ctx, 150*time.Second)
 	defer cancel()
 	r, err := s.offerings(ctx, in)
-	s.lastInput = in
+	r = s.mergeOfferings(r, in)
+	s.resetPreferencesForTerm(r.Term)
 	s.lastOfferings = &r
 	s.lastFit = nil
 	return r, err
@@ -358,6 +367,12 @@ func (s *CampusSession) offerings(ctx context.Context, in OfferingInput) (Offeri
 	result.Term, result.TermSource, err = s.resolveTerm(ctx, in)
 	if err != nil {
 		result.Warnings = append(result.Warnings, err.Error())
+		return result, nil
+	}
+	if s.candidateLimit(names, result.Term, in.ReplaceCandidates) {
+		result = *s.lastOfferings
+		result.Queries = append([]OfferingQuery(nil), result.Queries...)
+		result.Warnings = append(append([]string(nil), result.Warnings...), candidateLimitWarning)
 		return result, nil
 	}
 	if s.dictionary == nil {
@@ -434,7 +449,7 @@ func selectCourseIDs(query OfferingQuery, ids []string) OfferingQuery {
 	if len(ids) == 0 {
 		query.NeedsSelection = len(query.Classes) == 0 && len(query.Candidates) > 0
 		if query.NeedsSelection {
-			query.Warning = "名称尚未选定：请根据原名和上下文选最接近的候选课程号（相似者可选多个），将 courseIDs 传入同一工具继续核实；尚未筛选不表示冲突或不可放入。"
+			query.Warning = "名称尚未选定：请根据原名和上下文选最接近的候选课程号（相似者可选多个），将 courseIDs 传入 show_course_results 或同一工具继续核实；尚未筛选不表示冲突或不可放入。"
 		}
 		return query
 	}
@@ -443,19 +458,30 @@ func selectCourseIDs(query OfferingQuery, ids []string) OfferingQuery {
 		selected[id] = true
 	}
 	matches := []Offering{}
-	for _, o := range query.Classes {
-		if selected[o.CourseID] {
+	seen := map[string]bool{}
+	add := func(o Offering) {
+		if selected[o.CourseID] && !seen[o.ClassID] {
+			seen[o.ClassID] = true
 			matches = append(matches, o)
 		}
 	}
+	for _, o := range query.Classes {
+		add(o)
+	}
 	for _, candidate := range query.Candidates {
-		if selected[candidate.CourseID] {
-			matches = append(matches, candidate.Classes...)
+		for _, o := range candidate.Classes {
+			add(o)
 		}
 	}
-	query.Classes = matches
 	if len(matches) == 0 {
-		query.Warning = "选定课程号未在本次检索结果中找到；不能按名称猜测替代。"
+		// IDs selecting another query must not erase this query's exact match
+		// or turn an unrelated unresolved name into an empty selection.
+		return selectCourseIDs(query, nil)
+	}
+	query.Classes = matches
+	query.NeedsSelection = false
+	if strings.HasPrefix(query.Warning, "名称尚未选定") || strings.HasPrefix(query.Warning, "选定课程号未") {
+		query.Warning = ""
 	}
 	return query
 }
@@ -518,10 +544,18 @@ func (s *CampusSession) searchOffering(ctx context.Context, term AcademicTerm, n
 					continue
 				}
 				seen[id] = true
-				o := Offering{ClassID: r.ClassID, CourseID: r.CourseID, CourseName: cleanCampusText(r.CourseName, 100), Teacher: cleanCampusText(r.Teacher, 100), Credit: cleanCampusText(string(r.Credit), 20), Campus: cleanCampusText(r.CampusID, 30), Location: cleanCampusText(r.Location, 120), ClassTime: cleanCampusText(r.ClassTime, 1000), Examination: cleanCampusText(r.Examination, 60)}
-				if value := s.dictionary["campusID"][r.CampusID]; value != "" {
-					o.Campus = cleanCampusText(value, 50)
+				campus := strings.TrimSpace(s.dictionary["campusID"][r.CampusID])
+				if campus == "" && (r.CampusID == "下沙" || r.CampusID == "下沙校区") {
+					campus = r.CampusID
 				}
+				if campus == "" {
+					result.CampusUnconfirmed = true
+					continue
+				}
+				if !strings.Contains(campus, "下沙") {
+					continue
+				}
+				o := Offering{ClassID: r.ClassID, CourseID: r.CourseID, CourseName: cleanCampusText(r.CourseName, 100), Teacher: cleanCampusText(r.Teacher, 100), Credit: cleanCampusText(string(r.Credit), 20), Campus: cleanCampusText(campus, 50), Location: cleanCampusText(r.Location, 120), ClassTime: cleanCampusText(r.ClassTime, 1000), Examination: cleanCampusText(r.Examination, 60)}
 				if value := s.dictionary["examinationMethod"][r.Examination]; value != "" {
 					o.Examination = cleanCampusText(value, 60)
 				}

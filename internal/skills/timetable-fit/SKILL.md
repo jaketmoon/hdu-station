@@ -2,9 +2,9 @@
 name: timetable-fit
 description: 单独查看本人课表占用时段，或核对指定课程是否与课表、时间偏好冲突。
 ---
-使用 fit_courses_to_schedule。仅问本人课表或空闲时段时省略 courses，读取结果即可回答，不搜索推荐，也不要求选定课程。问指定课程能否放入时传课程名或沿用已查候选；未知开课时间可组合 offering-verification，工具支持一次查询并核对。
+使用 fit_courses_to_schedule。仅问本人课表或空闲时段时省略 courses，问局部课表也传 allowedDays、timeOfDay 或 allowedSections，展示该范围的占用与空闲；不搜索推荐，也不要求选定课程。问指定课程能否放入时传课程名或沿用已查候选；未知开课时间可组合 offering-verification，工具支持一次查询并核对。
 
-时间约定：上午为第1–5节，下午为第6–9节，晚上为第10–13节。用 timeOfDay 传 morning/afternoon/evening，由程序展开；明确节次用 allowedSections，明确星期用 allowedDays。多个时段可并集，同传具体节次时取交集。钟点如15:00不能只凭上述约定猜节次。只传用户明确的偏好，已有课的占用由工具读取，不把“周三下午有课”误作只允许周三下午。
+时间约定：上午为第1–5节，下午为第6–9节，晚上为第10–13节。用 timeOfDay 传 morning/afternoon/evening，由程序展开；明确节次用 allowedSections，明确星期用 allowedDays。多个时段可并集，同传具体节次时取交集。没有官方钟点对照时不猜节次。条件含糊或矛盾时先澄清；只传明确偏好，不把已有课的占用当作允许时段。
 
 按全部周次、星期、节次判断，采用工具结论；缺页或解析失败不能确认空闲。fits 仅指与原课表兼容，多门一起安排使用 suggestedPlan。追问保留课程和仍有效的限制，用户修改偏好则覆盖旧限制；指代某个班时结合前文的课程与上课时间定位。
 

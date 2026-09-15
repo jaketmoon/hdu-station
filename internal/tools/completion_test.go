@@ -45,3 +45,49 @@ func TestUnresolvedNamesCanBeShownWithoutPretendingTheyAreVerified(t *testing.T)
 		t.Fatal("candidate-only answer was blocked or falsely confirmed")
 	}
 }
+
+func TestQueryStateDistinguishesRejectedShowFromFailedQuery(t *testing.T) {
+	s := NewCampusSession(nil, nil)
+	_, _ = s.ShowCourses(context.Background(), ShowCoursesInput{})
+	if s.HasQueryResult() {
+		t.Fatal("display-only call invented query state")
+	}
+	_, _ = s.CheckOfferings(context.Background(), OfferingInput{})
+	if !s.HasQueryResult() || !strings.Contains(s.Display(), "1–12") {
+		t.Fatal("failed query response lost its diagnostic display")
+	}
+}
+
+func TestFocusedTimetableMergesWeeksAndShowsBothBusyAndFree(t *testing.T) {
+	s := NewCampusSession(nil, nil)
+	times, _ := parseCourseTimes("星期一第6-9节{1-17周};星期二第8-9节{1-7周,11-17周};星期二第8-9节{8-10周}")
+	s.lastFit = &FitCoursesResult{Term: AcademicTerm{"2026-2027", 1}, ScheduleComplete: true, BusyTimes: times}
+	s.scheduleRequested = true
+	text, err := s.ShowCourses(context.Background(), ShowCoursesInput{AllowedDays: []int{2}, TimeOfDay: []string{"afternoon"}})
+	if err != nil || !strings.Contains(text, "周二第6–7节 | 未发现占用 | 空闲") || !strings.Contains(text, "周二第8–9节 | 第1–17周有课") || strings.Contains(text, "周一") || strings.Contains(text, "其余时间未发现已选课程占用") {
+		t.Fatalf("focused schedule lost busy/free scope: %s", text)
+	}
+	if s.requests != 0 {
+		t.Fatal("displaying a focus reread campus or discovered courses")
+	}
+	s.lastFit.ScheduleComplete = false
+	text = s.Display()
+	if strings.Contains(text, "空闲（以本次课表为准）") || !strings.Contains(text, "暂不能确认空闲") {
+		t.Fatal("incomplete timetable approved free slots")
+	}
+	s.lastFit.ScheduleComplete = true
+	text, err = s.ShowCourses(context.Background(), ShowCoursesInput{TimeOfDay: []string{"evening"}})
+	if err != nil || !strings.Contains(text, "周二第10–13节") || strings.Contains(text, "| 周二第6") {
+		t.Fatal("new display focus did not replace old periods")
+	}
+}
+
+func TestUnfilteredTimetableStillDisplaysWholeWeek(t *testing.T) {
+	s := NewCampusSession(nil, nil)
+	times, _ := parseCourseTimes("星期一第6-9节{1-17周};星期二第8-9节{1-17周}")
+	s.lastFit = &FitCoursesResult{ScheduleComplete: true, BusyTimes: times}
+	text := s.Display()
+	if !strings.Contains(text, "周一") || !strings.Contains(text, "周二") || strings.Contains(text, "| 时间 |") {
+		t.Fatal("unrequested timetable focus imposed")
+	}
+}

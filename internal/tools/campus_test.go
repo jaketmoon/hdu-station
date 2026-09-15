@@ -254,3 +254,66 @@ func TestCampusFailuresStayBoundedAndDoNotReflectSecrets(t *testing.T) {
 		t.Fatal("unregistered route accepted")
 	}
 }
+
+func TestFitChoosesThreeCoursesAroundExistingTimetable(t *testing.T) {
+	s := campusFixture(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/config"):
+			return campusResponse(200, campusConfigJSON), nil
+		case strings.HasSuffix(r.URL.Path, "/map"):
+			return campusResponse(200, campusMapJSON), nil
+		case strings.HasSuffix(r.URL.Path, "/schedule"):
+			return campusResponse(200, `{"code":0,"data":[{"schoolYear":"2026-2027","semester":1,"classTime":"星期二第8-9节{1-17周}"}],"pagination":{"total":1,"limit":200,"offset":0,"hasMore":false}}`), nil
+		default:
+			name := r.URL.Query().Get("query")
+			switch name {
+			case "影视音乐赏析":
+				return campusResponse(200, catalogJSON(catalogClass("film-busy", "film", name, "星期二第8-9节{1-17周}"), catalogClass("film-night", "film", name, "星期二第10-11节{1-17周}"), catalogClass("film-afternoon", "film", name, "星期二第6-7节{1-17周}"))), nil
+			case "数字游戏设计与艺术赏析":
+				return campusResponse(200, catalogJSON(catalogClass("game-tue", "game", name, "星期二第10-11节{1-17周}"), catalogClass("game-wed", "game", name, "星期三第10-11节{1-17周}"))), nil
+			default:
+				return campusResponse(200, catalogJSON(catalogClass("writing-tue", "writing", name, "星期二第10-11节{1-17周}"))), nil
+			}
+		}
+	})
+	r, err := s.FitCourses(context.Background(), FitCoursesInput{Courses: []string{"影视音乐赏析", "数字游戏设计与艺术赏析", "书法鉴赏"}})
+	if err != nil || !r.ScheduleComplete || r.PlanIncomplete || !reflect.DeepEqual(r.SuggestedPlan, []string{"film-afternoon", "game-wed", "writing-tue"}) {
+		t.Fatalf("missed compatible three-course plan: %v %v", r.SuggestedPlan, err)
+	}
+	if r.Fits[0].Status != "conflict" {
+		t.Fatal("new plan changed existing-course conflict")
+	}
+	s.lastFit.PlanIncomplete = true
+	text := s.Display()
+	if !strings.Contains(text, "尚未确认是否还能安排更多") || strings.Contains(text, "film-afternoon") {
+		t.Fatal("search bound not visible or internal class ID exposed")
+	}
+}
+
+func TestOnlyConfirmedXiashaRowsEnterCandidatesAndPlans(t *testing.T) {
+	s := campusFixture(t, func(r *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/config"):
+			return campusResponse(200, campusConfigJSON), nil
+		case strings.HasSuffix(r.URL.Path, "/map"):
+			return campusResponse(200, `{"code":0,"data":{"campusID":{"1":"下沙","2":"青山湖"},"examinationMethod":{"2":"考查"}}}`), nil
+		case strings.HasSuffix(r.URL.Path, "/schedule"):
+			return campusResponse(200, `{"code":0,"data":[],"pagination":{"total":0,"limit":200,"offset":0,"hasMore":false}}`), nil
+		default:
+			known := catalogClass("known", "001", "影视音乐赏析", "星期二第10-11节{1-17周}")
+			other := catalogClass("other", "002", "影视音乐赏析", "星期三第10-11节{1-17周}")
+			other["campusID"] = "2"
+			unknown := catalogClass("unknown", "003", "影视音乐赏析", "星期四第10-11节{1-17周}")
+			unknown["campusID"] = "campus-private-internal-code"
+			return campusResponse(200, catalogJSON(known, other, unknown)), nil
+		}
+	})
+	result, err := s.FitCourses(context.Background(), FitCoursesInput{Courses: []string{"影视音乐赏析"}})
+	if err != nil || len(result.Fits) != 1 || len(result.SuggestedPlan) != 1 || result.Fits[0].Offering.Campus != "下沙" || !result.Offerings.Queries[0].CampusUnconfirmed {
+		t.Fatal("non-Xiasha or unknown campus entered fits/plan")
+	}
+	text := s.Display()
+	if strings.Contains(text, "campus-private-internal-code") || strings.Contains(text, "青山湖") || !strings.Contains(text, "校区未能确认") {
+		t.Fatal("campus identifier leaked or missing-campus limitation hidden")
+	}
+}

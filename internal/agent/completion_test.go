@@ -42,13 +42,32 @@ func TestPrematureShowDoesNotForceUnrequestedDiscovery(t *testing.T) {
 		if rounds == 1 {
 			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"early\",\"function\":{\"name\":\"show_course_results\",\"arguments\":\"{\\\"matchSchedule\\\":true}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n")
 		} else {
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"先从社区获取候选 suggestedPlan\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"尚未找到可核实的信息。\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
 		}
 	}))
 	defer server.Close()
 	e := Engine{Model: config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}}
 	r, err := e.Answer(context.Background(), []storage.Message{{Role: "user", State: "complete", Content: "按本人课表推荐影视音乐鉴赏"}}, nil)
-	if err != nil || rounds != 2 || strings.Contains(r.Text, "suggestedPlan") || strings.Contains(r.Text, "先从社区") {
+	if err != nil || rounds != 2 || r.Text != "尚未找到可核实的信息。" {
 		t.Fatalf("premature completion escaped guard: rounds=%d err=%v", rounds, err)
+	}
+}
+
+func TestCurrentTermToolIsRegisteredAndCanShowItsSafeFailure(t *testing.T) {
+	rounds := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rounds++
+		name := "get_academic_term"
+		if rounds > 1 {
+			name = "show_course_results"
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"term-%d\",\"function\":{\"name\":\"%s\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n", rounds, name)
+	}))
+	defer server.Close()
+	engine := Engine{Model: config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}}
+	result, err := engine.Answer(context.Background(), []storage.Message{{Role: "user", State: "complete", Content: "本学期是哪个学期？"}}, nil)
+	if err != nil || rounds != 2 || !strings.Contains(result.Text, "尚未确认教务默认查询学期") || result.Searches != 0 || result.Reads != 0 {
+		t.Fatalf("term-only tool did not finish: rounds=%d err=%v", rounds, err)
 	}
 }
