@@ -19,6 +19,8 @@ import (
 )
 
 type Result struct {
+	Actions []string
+
 	Text            string
 	Model           string
 	Searches, Reads int
@@ -43,32 +45,34 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 	defer cancel()
 	prompt, guilds := skills.CourseSelection()
+	actions := []string{}
 	session := tools.NewSession(e.Client, guilds, func(text string) { emit(Event{Kind: "status", Text: text}) }, e.Sources)
-	search, err := utils.InferTool("search_courses", "在已启用的 QQ 频道、赞哦、小红书中搜索课程讨论，返回来源、标题和帖子 id。可指定 source；选择相关帖子后读取正文与评论。", session.Search)
+	search, err := utils.InferTool("search_courses", "在已启用的 QQ 频道、赞哦、小红书中搜索课程讨论，返回来源、标题和帖子 id。可指定 source；选择相关帖子后读取正文与评论。", recordAction(&actions, "search_courses", session.Search))
 	if err != nil {
 		return Result{}, err
 	}
-	read, err := utils.InferTool("read_course_posts", "读取搜索到的帖子正文、评论与原帖链接，一次最多六个帖子。", session.Read)
+	read, err := utils.InferTool("read_course_posts", "读取搜索到的帖子正文、评论与原帖链接，一次最多六个帖子。", recordAction(&actions, "read_course_posts", session.Read))
 	if err != nil {
 		return Result{}, err
 	}
 	campus := tools.NewCampusSession(e.Campus, func(text string) { emit(Event{Kind: "status", Text: text}) })
-	offerings, err := utils.InferTool("check_course_offerings", "核实推荐课程的开课班级、老师、学分、时间与考核。先完整名称检索，没有精确匹配再查核心词；可用 coreKeywords 指定核心词。模糊候选 candidates 按课程号分组，模型选最接近者（相似时保留多个），将其 courseIDs 传入再次查询或课表筛选。未找到不等于未开课。", campus.CheckOfferings)
+	offerings, err := utils.InferTool("check_course_offerings", "核实指定课程的开课班级、老师、学分、时间与考核。先完整名称检索，没有精确匹配再查核心词；可用 coreKeywords 指定核心词。模糊候选 candidates 按课程号分组，模型选最接近者（相似时保留多个），将其 courseIDs 传入再次查询或课表筛选。未找到不等于未开课。", recordAction(&actions, "check_course_offerings", campus.CheckOfferings))
 	if err != nil {
 		return Result{}, err
 	}
-	fit, err := utils.InferTool("fit_courses_to_schedule", "读取本人完整课表，按全部周次、星期与节次判断候选班级能否放入空闲位置。提供课程名可直接检查开课和冲突；省略课程名只读取课表占用时段。遵守工具计算的 fits/conflict/unknown 等状态，suggestedPlan 才是彼此也无冲突的候选组合。", campus.FitCourses)
+	fit, err := utils.InferTool("fit_courses_to_schedule", "读取本人完整课表，按全部周次、星期与节次判断候选班级能否放入空闲位置。提供课程名可直接检查开课和冲突；省略课程名只读取课表占用时段。遵守工具计算的 fits/conflict/unknown 等状态，suggestedPlan 才是彼此也无冲突的候选组合。", recordAction(&actions, "fit_courses_to_schedule", campus.FitCourses))
 	if err != nil {
 		return Result{}, err
 	}
 	campusDisplay := ""
-	show, err := utils.InferTool("show_course_results", "完成校园核实后显示Go生成的课程、班级号、时间、冲突表并结束回答。用户要求按课表筛选时 matchSchedule=true；若尚未读课表会补查。模糊候选须先选定课程号。可附本轮社区经验摘要，不手写校园事实表。", func(ctx context.Context, in tools.ShowCoursesInput) (map[string]string, error) {
+	show, err := utils.InferTool("show_course_results", "展示本次已读取的课程信息或单独的本人课表占用时段，并结束回答。用户要求按课表筛选时 matchSchedule=true；若尚未读课表会补查。模糊候选可以如实显示；用户要核实具体课程时先选择课程号。可附本轮社区经验摘要，不手写校园事实表。", func(ctx context.Context, in tools.ShowCoursesInput) (map[string]string, error) {
+		actions = append(actions, "show_course_results")
 		display, err := campus.ShowCourses(ctx, in)
 		if err != nil {
 			return nil, err
 		}
 		if display == "" {
-			return map[string]string{"status": "incomplete", "nextStep": campus.CompletionGap()}, nil
+			return map[string]string{"status": "incomplete", "nextStep": "尚未取得查询结果；按用户本次需求查询即可，不要增加其他流程"}, nil
 		}
 		if session.Reads > 0 && strings.TrimSpace(in.CommunitySummary) != "" {
 			display = strings.TrimSpace(in.CommunitySummary) + "\n\n" + display
@@ -89,7 +93,6 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 		}
 		citations.consume(event)
 	})
-	provider.requiredTool = campus.RequiredTool
 	provider.completed = func() string { return campusDisplay }
 	provider.completionGap = campus.CompletionGap
 	provider.canUseTools = func() bool { return session.Calls+campus.Calls < 12 }
@@ -119,7 +122,7 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 		input = append(input, recent[i])
 	}
 	message, err := runner.Generate(ctx, input)
-	result := Result{Model: provider.state.actualModel, Searches: session.Searches, Reads: session.Reads, CampusCalls: campus.Calls, Sources: session.Sources(), Connections: session.ConnectionStates()}
+	result := Result{Actions: actions, Model: provider.state.actualModel, Searches: session.Searches, Reads: session.Reads, CampusCalls: campus.Calls, Sources: session.Sources(), Connections: session.ConnectionStates()}
 	if err != nil {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
@@ -163,4 +166,11 @@ func safeError(err error) string {
 		}
 	}
 	return "这次回答未能完成，请稍后重试"
+}
+
+func recordAction[I, O any](actions *[]string, name string, invoke func(context.Context, I) (O, error)) func(context.Context, I) (O, error) {
+	return func(ctx context.Context, in I) (O, error) {
+		*actions = append(*actions, name)
+		return invoke(ctx, in)
+	}
 }

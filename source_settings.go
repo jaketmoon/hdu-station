@@ -40,7 +40,7 @@ func (a *App) beginSourceChange(source string) (func(), error) {
 	}
 	a.sourceMu.Lock()
 	a.mu.Lock()
-	if a.active != nil {
+	if len(a.active) > 0 {
 		a.mu.Unlock()
 		a.sourceMu.Unlock()
 		return nil, errors.New("请等当前回答结束后再修改来源连接")

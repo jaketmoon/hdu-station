@@ -117,7 +117,7 @@ func TestXiaohongshuSearchReadAndCitationThroughAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rounds != 3 || reads != 3 || result.Searches != 1 || result.Reads != 1 || !strings.Contains(result.Text, "https://www.xiaohongshu.com/explore/"+noteID) || strings.Contains(result.Text, "private-sentinel") {
+	if rounds != 3 || reads != 3 || result.Searches != 1 || result.Reads != 1 || result.CampusCalls != 0 || !strings.Contains(result.Text, "https://www.xiaohongshu.com/explore/"+noteID) || strings.Contains(result.Text, "private-sentinel") {
 		t.Fatal("agent source search/read/citation pipeline incomplete")
 	}
 }

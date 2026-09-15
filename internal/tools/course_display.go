@@ -8,10 +8,11 @@ import (
 )
 
 type ShowCoursesInput struct {
-	MatchSchedule    bool   `json:"matchSchedule" jsonschema:"description=用户是否要求结合本人课表找空闲位置；true时若此前只查开课，将在显示前补做课表检查"`
-	AllowedDays      []int  `json:"allowedDays,omitempty" jsonschema:"description=此前尚未做课表检查时，传用户允许上课的星期；已筛选时保留此前偏好"`
-	AllowedSections  []int  `json:"allowedSections,omitempty" jsonschema:"description=此前尚未做课表检查时，传用户允许的节次；已筛选时保留此前偏好"`
-	CommunitySummary string `json:"communitySummary,omitempty" jsonschema:"description=可选：仅概述本轮已读社区经验、推荐理由和原帖引用，不写校园班级号、上课时间或冲突表，这些由Go直接展示"`
+	TimeOfDay        []string `json:"timeOfDay,omitempty" jsonschema:"description=用户允许的时段；仅查询开课也可过滤，不必读取本人课表：morning上午1–5节、afternoon下午6–9节、evening晚上10–13节"`
+	MatchSchedule    bool     `json:"matchSchedule" jsonschema:"description=用户是否要求结合本人课表找空闲位置；true时若此前只查开课，将在显示前补做课表检查"`
+	AllowedDays      []int    `json:"allowedDays,omitempty" jsonschema:"description=用户允许上课的星期；只查开课时也可过滤时间，已筛选时保留此前偏好"`
+	AllowedSections  []int    `json:"allowedSections,omitempty" jsonschema:"description=用户允许的节次；只查开课时也可过滤时间，已筛选时保留此前偏好"`
+	CommunitySummary string   `json:"communitySummary,omitempty" jsonschema:"description=可选：仅概述本轮已读社区经验、推荐理由和原帖引用，不写校园班级号、上课时间或冲突表，这些由Go直接展示"`
 }
 
 func (s *CampusSession) ShowCourses(ctx context.Context, in ShowCoursesInput) (string, error) {
@@ -19,12 +20,26 @@ func (s *CampusSession) ShowCourses(ctx context.Context, in ShowCoursesInput) (s
 	if !s.CanShowCourses() {
 		return "", nil
 	}
-	if (in.MatchSchedule || s.scheduleRequested) && (s.lastFit == nil || s.lastFit.Offerings != s.lastOfferings) {
+	if s.HasCourseResults() && (in.MatchSchedule || s.scheduleRequested) && (s.lastFit == nil || s.lastFit.Offerings != s.lastOfferings || len(in.TimeOfDay) > 0 || in.AllowedDays != nil || in.AllowedSections != nil) {
 		x := s.lastInput
-		_, err := s.FitCourses(ctx, FitCoursesInput{Courses: x.Courses, CoreKeywords: x.CoreKeywords, CourseIDs: x.CourseIDs, SchoolYear: x.SchoolYear, Semester: x.Semester, AllowedDays: in.AllowedDays, AllowedSections: in.AllowedSections})
+		_, err := s.FitCourses(ctx, FitCoursesInput{TimeOfDay: in.TimeOfDay, Courses: x.Courses, CoreKeywords: x.CoreKeywords, CourseIDs: x.CourseIDs, SchoolYear: x.SchoolYear, Semester: x.Semester, AllowedDays: in.AllowedDays, AllowedSections: in.AllowedSections})
 		if err != nil {
 			return "", err
 		}
+	}
+	if !s.scheduleRequested {
+		sections := in.AllowedSections
+		if len(in.TimeOfDay) > 0 {
+			var err error
+			sections, err = sectionsForTimeOfDay(in.TimeOfDay, sections)
+			if err != nil {
+				return "", err
+			}
+		}
+		if !validSelection(in.AllowedDays, 7) || !validSelection(sections, 14) {
+			return "", fmt.Errorf("允许的星期须为1–7，节次须为1–14")
+		}
+		s.displayPreferences = FitCoursesInput{AllowedDays: in.AllowedDays, AllowedSections: sections}
 	}
 	return s.Display(), nil
 }
@@ -67,7 +82,7 @@ func (s *CampusSession) Display() string {
 	r := s.lastOfferings
 	if r == nil {
 		if s.lastFit != nil {
-			return "本次尚未完成具体课程的开课与时间核实，暂时无法给出可放入课表的班级。"
+			return s.displaySchedule()
 		}
 		return "尚未取得开课或课表查询结果。"
 	}
@@ -128,7 +143,7 @@ func (s *CampusSession) Display() string {
 		}
 	}
 	if rows > 0 {
-		b.WriteString("| 课程 / 课程号 / 班级号 | 老师 · 学分 · 考核 | 上课时间 · 地点 | 核实结果 |\n| --- | --- | --- | --- |\n")
+		b.WriteString("| 课程 / 课程号 | 老师 · 学分 · 考核 | 上课时间 · 地点 | 核实结果 |\n| --- | --- | --- | --- |\n")
 		seen := map[string]bool{}
 		for _, q := range r.Queries {
 			for _, o := range q.Classes {
@@ -137,6 +152,16 @@ func (s *CampusSession) Display() string {
 				}
 				seen[o.ClassID] = true
 				status := "查到开课记录"
+				if !s.scheduleRequested && (len(s.displayPreferences.AllowedDays) > 0 || len(s.displayPreferences.AllowedSections) > 0) {
+					checked := fitCourse(o, scheduleResult{}, s.displayPreferences)
+					if checked.Status == "outside_preferences" {
+						status = "不符合指定时间偏好"
+					} else if o.TimeComplete {
+						status = "符合指定时间；未核对本人课表"
+					} else {
+						status = "上课时间不完整，待确认"
+					}
+				}
 				if f, ok := fits[o.ClassID]; ok {
 					switch f.Status {
 					case "fits":
@@ -153,7 +178,7 @@ func (s *CampusSession) Display() string {
 				} else if s.lastFit != nil {
 					status = "尚未核实课表兼容性"
 				}
-				fmt.Fprintf(&b, "| %s / %s / %s | %s · %s学分 · %s | %s · %s %s | %s |\n", campusCell(o.CourseName), campusCell(o.CourseID), campusCell(o.ClassID), campusCell(o.Teacher), campusCell(o.Credit), campusCell(o.Examination), campusCell(o.ClassTime), campusCell(o.Campus), campusCell(o.Location), campusCell(status))
+				fmt.Fprintf(&b, "| %s / %s | %s · %s学分 · %s | %s · %s %s | %s |\n", campusCell(o.CourseName), campusCell(o.CourseID), campusCell(o.Teacher), campusCell(o.Credit), campusCell(o.Examination), campusCell(o.ClassTime), campusCell(o.Campus), campusCell(o.Location), campusCell(status))
 			}
 		}
 		b.WriteString("\n")
@@ -170,7 +195,7 @@ func (s *CampusSession) Display() string {
 			b.WriteString("**一组可以同时放入的候选班级：**\n\n")
 			for _, id := range f.SuggestedPlan {
 				o := fits[id].Offering
-				fmt.Fprintf(&b, "- %s（班级号 %s）\n", campusCell(o.CourseName), campusCell(id))
+				fmt.Fprintf(&b, "- %s（%s，%s）\n", campusCell(o.CourseName), campusCell(o.Teacher), campusCell(o.ClassTime))
 			}
 			b.WriteString("\n每个课程号只选一个班；这是按候选顺序得到的一组无冲突组合。\n\n")
 		}
@@ -197,5 +222,34 @@ func (s *CampusSession) Display() string {
 		}
 	}
 	b.WriteString("来源：校园教务查询。开课检索覆盖未确认，未检索到不等于未开课。未校验实时余量、选课资格、学分认定、考试冲突或跨校区通勤；以上为选课建议，尚未执行选课。")
+	return b.String()
+}
+
+func (s *CampusSession) displaySchedule() string {
+	f := s.lastFit
+	var b strings.Builder
+	if f.Term.valid() {
+		fmt.Fprintf(&b, "已读取 **%s 学年第 %d 学期**的本人课表。\n\n", f.Term.SchoolYear, f.Term.Semester)
+	}
+	if len(f.BusyTimes) > 0 {
+		b.WriteString("已知占用时段：\n\n")
+		for _, slot := range f.BusyTimes {
+			fmt.Fprintf(&b, "- %s\n", displayTimes([]CourseTime{slot}))
+		}
+		b.WriteString("\n")
+	}
+	if f.ScheduleEmpty {
+		b.WriteString("教务返回空课表；请确认学期及尚未同步的选课。\n\n")
+	} else if f.ScheduleComplete {
+		b.WriteString("课表已完整读取；其余时间未发现已选课程占用。\n\n")
+	} else {
+		b.WriteString("课表未完整核实，不能确认其他时段空闲。\n\n")
+	}
+	for _, warning := range f.Warnings {
+		if !strings.Contains(warning, "suggestedPlan") {
+			b.WriteString(campusCell(warning) + "\n\n")
+		}
+	}
+	b.WriteString("时段约定：上午第1–5节，下午第6–9节，晚上第10–13节。来源：校园教务课表。")
 	return b.String()
 }

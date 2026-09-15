@@ -16,10 +16,12 @@ import (
 )
 
 type Client struct {
-	root string
-	mu   sync.Mutex
-	next time.Time
-	run  func(context.Context, ...string) (json.RawMessage, error)
+	root     string
+	gateOnce sync.Once
+	gate     chan struct{}
+	paceMu   sync.Mutex
+	next     time.Time
+	run      func(context.Context, ...string) (json.RawMessage, error)
 }
 
 func NewClient(root string) *Client { c := &Client{root: root}; c.run = c.command; return c }
@@ -121,26 +123,54 @@ func (c *Client) command(ctx context.Context, args ...string) (json.RawMessage, 
 	return envelope.Data, nil
 }
 func (c *Client) read(ctx context.Context, progress func(string), args ...string) (json.RawMessage, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if wait := time.Until(c.next); wait > 0 {
-		if err := waitFor(ctx, wait); err != nil {
-			return nil, err
-		}
+	c.gateOnce.Do(func() { c.gate = make(chan struct{}, 3) })
+	select {
+	case c.gate <- struct{}{}:
+		defer func() { <-c.gate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	data, err := c.run(ctx, args...)
-	c.next = time.Now().Add(600 * time.Millisecond)
-	if err != nil && err.Error() == "rate_limited" {
-		progress("频道暂时限流，稍等一分钟后继续…")
-		if err := waitFor(ctx, 70*time.Second); err != nil {
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := c.waitReadStart(ctx); err != nil {
 			return nil, err
 		}
-		data, err = c.run(ctx, args...)
-		if err != nil && err.Error() == "rate_limited" {
+		data, err := c.run(ctx, args...)
+		if err == nil || err.Error() != "rate_limited" {
+			return data, err
+		}
+		// Cool down the shared account, including readers already waiting to
+		// start. Cancelling this request must not remove that cooldown.
+		c.paceMu.Lock()
+		if until := time.Now().Add(70 * time.Second); until.After(c.next) {
+			c.next = until
+		}
+		c.paceMu.Unlock()
+		if attempt == 1 {
 			return nil, errors.New("频道仍在限流，请稍后再试")
 		}
+		progress("频道暂时限流，稍等一分钟后继续…")
 	}
-	return data, err
+	return nil, errors.New("频道仍在限流，请稍后再试")
+}
+
+func (c *Client) waitReadStart(ctx context.Context) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		c.paceMu.Lock()
+		wait := time.Until(c.next)
+		if wait <= 0 {
+			c.next = time.Now().Add(600 * time.Millisecond)
+			c.paceMu.Unlock()
+			return nil
+		}
+		c.paceMu.Unlock()
+		if err := waitFor(ctx, wait); err != nil {
+			return err
+		}
+		// A different reader may have advanced either spacing or cooldown.
+	}
 }
 func waitFor(ctx context.Context, d time.Duration) error {
 	t := time.NewTimer(d)

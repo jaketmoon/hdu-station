@@ -197,68 +197,39 @@ type OfferingResult struct {
 
 // State and request cache live for one answer only, never in SQLite.
 type CampusSession struct {
-	client            *CampusClient
-	progress          func(string)
-	mu                sync.Mutex
-	requests          int
-	Calls             int
-	term              *AcademicTerm
-	dictionary        map[string]map[string]string
-	schedules         map[AcademicTerm]scheduleResult
-	queries           map[string]OfferingQuery
-	requiredTool      string
-	lastInput         OfferingInput
-	lastOfferings     *OfferingResult
-	lastFit           *FitCoursesResult
-	scheduleRequested bool
-	fitPreferences    FitCoursesInput
-	origins           map[string][]string
+	client             *CampusClient
+	progress           func(string)
+	mu                 sync.Mutex
+	requests           int
+	Calls              int
+	term               *AcademicTerm
+	dictionary         map[string]map[string]string
+	schedules          map[AcademicTerm]scheduleResult
+	queries            map[string]OfferingQuery
+	displayPreferences FitCoursesInput
+	lastInput          OfferingInput
+	lastOfferings      *OfferingResult
+	lastFit            *FitCoursesResult
+	scheduleRequested  bool
+	fitPreferences     FitCoursesInput
+	origins            map[string][]string
 }
 
-// While fuzzy matches remain, the next model turn must select official course
-// IDs through the same read tool before it can describe them as checked.
-func (s *CampusSession) RequiredTool() string { return s.requiredTool }
 func (s *CampusSession) HasCourseResults() bool {
 	return s.lastOfferings != nil && len(s.lastOfferings.Queries) > 0
 }
 
+// Completion validates available records, never expands a user's request into
+// discovery or schedule matching. Unresolved candidates may be shown as such.
 func (s *CampusSession) CanShowCourses() bool {
-	if !s.HasCourseResults() {
-		return false
-	}
-	for _, q := range s.lastOfferings.Queries {
-		if q.NeedsSelection {
-			return false
-		}
-	}
-	return true
+	return s.HasCourseResults() || s.lastFit != nil
 }
-
 func (s *CampusSession) CompletionGap() string {
-	if s.Calls == 0 {
-		return ""
+	if s.CanShowCourses() {
+		return "已有查询结果，请用 show_course_results 展示本次所问内容；不需要追加未请求的推荐、开课或课表检查。"
 	}
-	if !s.HasCourseResults() {
-		return "尚未完成具体候选课程核实。读取本人课表只是准备步骤；若用户已给课名或历史里已有候选，沿用它们，传 courses 查询开课并检查时间。否则先从已连接社区查找候选。不能仅输出忙闲时段、内部说明或声称推荐已经完成。"
-	}
-	if !s.CanShowCourses() {
-		return "仍有模糊课程候选未匹配：先选择课程号，再完成核实。"
-	}
-	return "核实结果已就绪，请调用 show_course_results 展示具体课程和排除原因。"
+	return ""
 }
-func (s *CampusSession) requireSelection(r OfferingResult, tool string) {
-	s.requiredTool = ""
-	for _, q := range r.Queries {
-		if q.NeedsSelection {
-			s.requiredTool = tool
-			return
-		}
-	}
-	if len(r.Queries) > 0 {
-		s.requiredTool = "show_course_results"
-	}
-}
-
 func NewCampusSession(client *CampusClient, progress func(string)) *CampusSession {
 	if progress == nil {
 		progress = func(string) {}
@@ -364,14 +335,12 @@ func validCourses(names []string, allowEmpty bool) ([]string, error) {
 
 func (s *CampusSession) CheckOfferings(ctx context.Context, in OfferingInput) (OfferingResult, error) {
 	s.Calls++
-	s.requiredTool = ""
 	ctx, cancel := context.WithTimeout(ctx, 150*time.Second)
 	defer cancel()
 	r, err := s.offerings(ctx, in)
 	s.lastInput = in
 	s.lastOfferings = &r
 	s.lastFit = nil
-	s.requireSelection(r, "check_course_offerings")
 	return r, err
 }
 func (s *CampusSession) offerings(ctx context.Context, in OfferingInput) (OfferingResult, error) {

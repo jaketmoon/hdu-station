@@ -215,7 +215,7 @@ test.beforeEach(async ({ page }) => {
               question.includes("本学期开课")
             )
               answer =
-                "已核实教务默认学期：2026–2027 学年第1学期。\n\n| 课程（课程号 / 班级号） | 老师 | 上课时间 | 课表筛选 |\n| --- | --- | --- | --- |\n| 影视音乐赏析（001 / class-a0123456789ABCDEF0123456789ABCDEF） | 测试老师 | 星期二第10–11节，第1–17周 | 可放入空闲位置 |\n| 戏曲鉴赏（002 / class-b0123456789ABCDEF0123456789ABCDEF） | 测试老师 | 星期三第6–7节，第1–17周 | 与已选课程冲突 |\n\n网上的“影视音乐鉴赏”可能对应“影视音乐赏析”（001）。建议先考虑 class-a；是否有余量和选课资格仍需以教务系统为准。";
+                "已核实教务默认学期：2026–2027 学年第1学期。\n\n| 课程（课程号） | 老师 | 上课时间 | 课表筛选 |\n| --- | --- | --- | --- |\n| 影视音乐赏析（001） | 测试老师 | 星期二第10–11节，第1–17周 | 可放入空闲位置 |\n| 戏曲鉴赏（002） | 测试老师 | 星期三第6–7节，第1–17周 | 与已选课程冲突 |\n\n网上的“影视音乐鉴赏”可能对应“影视音乐赏析”（001）。建议先考虑影视音乐赏析周二10–11节的班；是否有余量和选课资格仍需以教务系统为准。";
             if (question === "长回答滚动测试")
               answer = Array(5).fill(answer).join("\n\n");
             for (
@@ -473,7 +473,7 @@ test("course fit recommendation and course IDs remain readable", async ({
   await page.goto("/");
   await page.getByRole("button", { name: /空闲时间塞门课/ }).click();
   await expect(page.getByRole("button", { name: "复制回答" })).toBeVisible();
-  await expect(page.getByRole("table")).toContainText("class-a");
+  await expect(page.getByRole("table")).toContainText("影视音乐赏析（001）");
   await expect(page.getByRole("table")).toContainText("与已选课程冲突");
   expect(
     await page.evaluate(

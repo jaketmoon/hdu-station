@@ -38,7 +38,7 @@ func TestLiveCampusMatchingAndFitThroughModel(t *testing.T) {
 	engine := Engine{Model: cfg.Model, Campus: tools.NewCampusClient(liveCampusCredential(pat)), Sources: config.Sources{QQ: config.QQ{Disabled: true}}}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
-	result, err := engine.Answer(ctx, []storage.Message{{Role: "user", State: "complete", Content: "我在网上看到两门推荐：影视音乐鉴赏、戏曲鉴赏。请核实本学期开课；名字不完全一致就按完整名称、影视音乐这个核心词两步查找，选最接近的官方候选（相似的可以保留多个），再结合我的课表筛选能塞进空闲位置的班级。这轮不用搜索社区，也不用评价课程好坏。请给出课程号、班级号、上课时间和是否能放进课表；不要展示我的已选课表。"}}, nil)
+	result, err := engine.Answer(ctx, []storage.Message{{Role: "user", State: "complete", Content: "我在网上看到两门推荐：影视音乐鉴赏、戏曲鉴赏。请核实本学期开课；名字不完全一致就按完整名称、影视音乐这个核心词两步查找，选最接近的官方候选（相似的可以保留多个），再结合我的课表筛选能塞进空闲位置的班级。这轮不用搜索社区，也不用评价课程好坏。请给出课程号、老师、上课时间和是否能放进课表，不展示班级号；不要展示我的已选课表。"}}, nil)
 	if err != nil {
 		t.Fatal("live model flow failed; details withheld")
 	}

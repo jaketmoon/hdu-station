@@ -1,53 +1,86 @@
 {
-  "version": 1,
-  "provenance": "原五组为真实桌面回归；扩展问题依据已读QQ选课讨论主题及常见学生约束人工编写，不冒充逐字原帖。",
+  "version": 3,
+  "provenance": "基于用户删减后的53组/58轮与可组合Skill题集，按2026-09-13新账号密集课表调整18组；保留原ID及已删除的7题，每组独立会话，多轮保留历史。具体预期绑定本次课表快照，换账号须重新核实。",
   "cases": [
     {
       "id": "R01",
       "category": "推荐后追问",
       "turns": [
-        "想选两三门作业少一点的通识，偏音乐、艺术，帮我推荐一下，顺便看看这学期有没有开。",
-        "刚才这些课里，哪些班可以插进我的空课？按我现在的课表筛掉撞课的，给一个能一起上的组合。"
+        "想了解两三门作业少一点的通识，偏音乐、艺术，帮我推荐一下，先看看大家怎么评价。",
+        "刚才这些课里，哪些本学期开了、还能插进我的空课？我这学期原有课很多，请读取现在的课表筛掉撞课的，给一个能一起上的组合。"
       ],
-      "expected": "默认来源完成推荐与开课核实；追问沿用候选，组合互不冲突",
-      "mode": "computer_use"
+      "expected": "首轮仅发现/评价，不调用校园工具；追问继承候选，读取新账号实际课表，按周次、星期、全部节次排除冲突，新增课程彼此不冲突。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery",
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "discovery",
+        "feasibility"
+      ]
     },
     {
       "id": "R02",
-      "category": "周次冲突",
+      "category": "整学期周次冲突",
       "turns": [
-        "我目前只有周三下午有课。帮我看「形势与政策1」各个班能不能塞进去，撞上的排掉。只核对开课和时间，不用查帖子。"
+        "浙江传统文化的周四8到9节班能塞进去吗？我前几周那个时间看着挺空的，请按整个学期的实际课表查，不用看评价。"
       ],
-      "expected": "排除第1–9周周三6–7节重叠班；保留不同周次或节次班",
-      "mode": "computer_use"
+      "expected": "周四8–9节班在第7–17周与已有第6–8节课重叠第8节，必须判冲突；不能只检查前几周或认为只撞一节就能上。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "feasibility"
+      ]
     },
     {
       "id": "R03",
       "category": "同日不同时段",
       "turns": [
-        "我周三下午有课，晚上空着。原创音乐作曲实践课能放周三晚上吗？直接结合我的本学期课表看看，不用查社区评价。"
+        "我周一下午已经排满了，西方建筑艺术赏析还有当天能插进去的班吗？只对照本学期开课和我的课表，不查评价。"
       ],
-      "expected": "保留周三10–11节的原创音乐作曲实践课",
-      "mode": "computer_use"
+      "expected": "周一6–7节冲突，周一10–11节可放；同一天白天有课不代表晚上也不可用。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "R04",
       "category": "星期偏好",
       "turns": [
-        "影视音乐鉴赏和戏曲鉴赏想二选一。周五我想整天留空，其他时间不跟我课表冲突就行。帮我核实这学期能安排哪个班，不用搜帖子。",
+        "影视音乐鉴赏和戏曲鉴赏想二选一。周五不想再加课，其他时间不跟我课表冲突就行。帮我核实这学期能安排哪个班，不用搜帖子。",
         "那戏曲鉴赏是这学期没开，还是时间不合适？"
       ],
-      "expected": "按C5692013匹配影视音乐；排除周五戏曲，解释不是未开课",
-      "mode": "computer_use"
+      "expected": "按C5692013匹配影视音乐，周二6–7和10–11可放、8–9冲突；戏曲已开，但周五6–7既撞原课表又不符合不新增周五课的偏好。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed",
+        "mixed"
+      ]
     },
     {
       "id": "R05",
       "category": "同课异名与节次",
       "turns": [
-        "网上一帖叫「影视音乐鉴赏」，另一帖叫「影视音乐赏析」，这是同一门吗？我只想占周二下午第6到9节的空档，查本学期和我的课表后给一个班就好，不要把不同叫法算成两门，不用再查帖子。"
+        "网上一帖叫「影视音乐鉴赏」，另一帖叫「影视音乐赏析」，这是同一门吗？我只考虑周二下午第6到9节，读一下现在的课表，给能插进去的一个班；不要把不同叫法算成两门，不用再查帖子。"
       ],
-      "expected": "同课程号归并；周二6–7和8–9可放，10–11不符合；组合仅一班",
-      "mode": "computer_use"
+      "expected": "同课程号归并；只有周二6–7可放，8–9与原课表冲突，10–11不符合下午偏好；组合仅一班。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E01",
@@ -55,8 +88,14 @@
       "turns": [
         "通识有没有轻松点的课啊，别作业一堆。"
       ],
-      "expected": "读真实口碑并核实具体候选本学期开课",
-      "mode": "live_engine"
+      "expected": "读真实口碑推荐具体课程；不自动核实开课或读取本人课表。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
+      ],
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E02",
@@ -64,8 +103,14 @@
       "turns": [
         "想冲绩点，哪些选修老师给分比较友好？"
       ],
-      "expected": "引用真实讨论，区分老师，不承诺高分",
-      "mode": "live_engine"
+      "expected": "引用真实讨论并区分老师，不承诺高分；仅课程发现，不强制校园核实。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
+      ],
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E03",
@@ -74,34 +119,44 @@
         "有没有不用闭卷考试的选修，交论文就行？"
       ],
       "expected": "区分社区经验与官方考查，不能把考查等同论文",
-      "mode": "live_engine"
-    },
-    {
-      "id": "E04",
-      "category": "考核",
-      "turns": [
-        "我不想做小组展示，有什么通识可以选？"
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
       ],
-      "expected": "评价有依据，未明确展示要求标未知",
-      "mode": "live_engine"
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E05",
       "category": "工作量",
       "turns": [
-        "这学期专业课太多，想找平时作业少的两学分课。"
+        "这学期专业课太多，推荐平时作业少的两学分课，再核实本学期开课和学分，先不用查我的课表。"
       ],
-      "expected": "有社区依据，核实学分及开课",
-      "mode": "live_engine"
+      "expected": "课程发现＋开课核实；有口碑依据和官方学分信息，不读取本人课表。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery",
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "discovery+offering"
+      ]
     },
     {
       "id": "E06",
       "category": "老师",
       "turns": [
-        "徐艳老师的影视音乐鉴赏怎么样，值得抢吗？"
+        "徐艳老师的影视音乐鉴赏怎么样？先看同学的评价，不用查开课。"
       ],
-      "expected": "区分真实口碑与余量，匹配官方影视音乐赏析",
-      "mode": "live_engine"
+      "expected": "引用真实老师口碑或说明不足，不核实开课、余量或本人课表。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
+      ],
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E07",
@@ -110,7 +165,13 @@
         "书法鉴赏吴一桥老师，零基础会不会很难？"
       ],
       "expected": "不要从课名编造难度，引用实际讨论或说明不足",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
+      ],
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E08",
@@ -119,7 +180,13 @@
         "不太会画画，但想选艺术类的课，有没有合适的？"
       ],
       "expected": "不以名称臆测课程要求，提供依据",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
+      ],
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E09",
@@ -127,17 +194,14 @@
       "turns": [
         "想学点生活里用得上的法律常识，推荐什么课？"
       ],
-      "expected": "候选来源真实并核实开课",
-      "mode": "live_engine"
-    },
-    {
-      "id": "E10",
-      "category": "兴趣",
-      "turns": [
-        "有适合社恐的选修吗？不想上台讲话。"
+      "expected": "从真实课程体验推荐生活法律常识课，不自动查询开课或课表。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
       ],
-      "expected": "不保证无展示，区分未知要求",
-      "mode": "live_engine"
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E11",
@@ -146,16 +210,13 @@
         "戏曲鉴赏本学期在哪天上，几学分？只查教务。"
       ],
       "expected": "C5692012周五6–7第1–16周，2学分",
-      "mode": "live_engine"
-    },
-    {
-      "id": "E12",
-      "category": "简称",
-      "turns": [
-        "影视音乐那门今年还开吗？"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
       ],
-      "expected": "核心词匹配，不把简称当精确名",
-      "mode": "live_engine"
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E13",
@@ -164,16 +225,28 @@
         "影视音悦鉴赏能塞到我的课表吗？不搜帖子。"
       ],
       "expected": "合理扩大核心词或说明未确认，不伪造课程",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E14",
       "category": "名称变体",
       "turns": [
-        "电影音乐鉴赏是不是就是影视音乐赏析？这学期能选哪个班？"
+        "电影音乐鉴赏是不是就是影视音乐赏析？帮我查本学期开课班级，先不考虑我的课表。"
       ],
-      "expected": "按官方候选和课程号区分，推断需标注",
-      "mode": "live_engine"
+      "expected": "按官方候选及课程号区分，推断标注；不查社区或本人课表。",
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E15",
@@ -182,7 +255,13 @@
         "同学说有门游戏赏析，能查到正式课名和上课时间吗？"
       ],
       "expected": "定位数字游戏设计与艺术赏析或说明歧义",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E16",
@@ -191,16 +270,13 @@
         "艺术鉴赏本学期开吗？我忘了全名，可能是音乐也可能是戏曲。"
       ],
       "expected": "展示多个可能官方课程，不强选一个",
-      "mode": "live_engine"
-    },
-    {
-      "id": "E17",
-      "category": "课程号",
-      "turns": [
-        "帮我查C5692013，本学期有没有班能放进我的课表？"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
       ],
-      "expected": "识别课程号并查影视音乐赏析，不能将编号当不存在课程",
-      "mode": "live_engine"
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E18",
@@ -209,7 +285,11 @@
         "影视音乐赏析有三个班，我能把三个班都塞进去凑6学分吗？"
       ],
       "expected": "说明同课程只选一班，不能计三门",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E19",
@@ -218,7 +298,13 @@
         "我想早上上课，戏曲鉴赏和影视音乐赏析哪个符合？只查开课和课表。"
       ],
       "expected": "两者已知班都不满足上午，不能硬给方案",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E20",
@@ -226,8 +312,14 @@
       "turns": [
         "不要晚课，帮我在影视音乐赏析里找一个不撞课的下午班。"
       ],
-      "expected": "保留周二6–7或8–9，排除10–11",
-      "mode": "live_engine"
+      "expected": "下午对应6–9节；新课表只允许周二6–7班，8–9冲突，10–11不符合偏好。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E21",
@@ -236,16 +328,28 @@
         "我只想周二晚上加一门，影视音乐赏析能放吗？"
       ],
       "expected": "仅周二10–11班符合",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E22",
       "category": "周末偏好",
       "turns": [
-        "周末有空，戏曲鉴赏能安排在周六日吗？"
+        "只考虑周末加课，戏曲鉴赏能安排在周六日吗？"
       ],
-      "expected": "当前周五班不符合，不能改时间",
-      "mode": "live_engine"
+      "expected": "当前周五班不符合，不能改变官方上课日，也不能将周末偏好当成已经查过本人课表。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E23",
@@ -254,7 +358,13 @@
         "周二不要排课，影视音乐赏析还有别的日子吗？"
       ],
       "expected": "已查三个周二班均不符合，未查到不等于全量没有",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E24",
@@ -263,70 +373,117 @@
         "只考虑周二和周四的课，戏曲鉴赏和书法鉴赏怎么选？"
       ],
       "expected": "排除周五戏曲，保留周二书法",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E25",
-      "category": "具体节次",
+      "category": "部分节次冲突",
       "turns": [
-        "我只空第8节，影视音乐赏析的8到9节班能塞吗？"
+        "周四下午第9节看着是空的，那浙江传统文化的8到9节班能插吗？帮我按本人课表核对整段上课时间。"
       ],
-      "expected": "完整班含第9节不满足，只空一节不足",
-      "mode": "live_engine"
+      "expected": "不能只检查空闲第9节；第7–17周的第8节与已有课重叠，整个班冲突。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E26",
-      "category": "具体节次",
+      "category": "用户记忆与实际课表",
       "turns": [
-        "星期二6、7节空着，帮我核实影视音乐赏析能不能上。"
+        "我记得周二下午没课，影视音乐赏析下午两个班是不是都能选？以现在读到的课表为准，帮我确认。"
       ],
-      "expected": "第6–7班可放，其他班不符合指定节次",
-      "mode": "live_engine"
+      "expected": "纠正与实际课表矛盾的记忆：周二6–7可放、8–9冲突；同课程最多选一个班，不能把用户说没课直接当事实。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E27",
       "category": "联合排课",
       "turns": [
-        "影视音乐赏析、数字游戏设计与艺术赏析、书法鉴赏都想选，帮我放进课表。"
+        "影视音乐赏析、数字游戏设计与艺术赏析、书法鉴赏都想选。我的原课表别动，能不能把这三门同时塞进去？能的话给一个三门互不撞的组合。"
       ],
-      "expected": "同课程去重，新增课程彼此也不冲突",
-      "mode": "live_engine"
+      "expected": "存在三门方案：影视周二6–7、书法周二10–11、数字游戏周三10–11；检查原课表和新课彼此冲突，不能仅因贪心选班只给两门。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E28",
-      "category": "冲突解释",
+      "category": "周次冲突解释",
       "turns": [
-        "为什么周三下午有课，还能推荐形势与政策1的周三6到7节班？"
+        "浙江传统文化周四8到9节那个班为什么不能加？我前6周下午都空着，具体是哪些周、哪一节撞了？只查教务和本人课表。"
       ],
-      "expected": "按周次解释1–9与10–17不重叠，不称当天全空",
-      "mode": "live_engine"
+      "expected": "解释课程开在第1–17周，第7–17周的第8节与本人课表冲突；前6周空闲不足以整学期兼容，不用展示已选课程身份。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E29",
       "category": "课表已有",
       "turns": [
-        "我已选的形势与政策（国家安全教育）1，还能再加另一个班吗？"
+        "我课表里已经选上的一门课，如果另一个班时间不冲突，还能当成一门新课再加进去凑学分吗？"
       ],
-      "expected": "按已选课程号识别，不能重复安排",
-      "mode": "live_engine"
+      "expected": "同一课程号的不同班不算两门；时间不冲突不代表可以重复计学分。问原则即可，不必猜新账号已选课程名称或查无名课程。",
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E30",
       "category": "先读课表",
       "turns": [
-        "先看看我的课表，再给我推荐几门轻松的通识。"
+        "先读一下我这学期的课表，已经排了不少课了，再推荐几门轻松、真能塞进剩余空档的通识。"
       ],
-      "expected": "读取课表后继续候选与核实，不能只显示准备提示",
-      "mode": "live_engine"
+      "expected": "不能只读课表；结合真实口碑、官方开课和新账号课表给具体可放班，保留原课，新增课程互不冲突。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery",
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E31",
       "category": "只查课表",
       "turns": [
-        "我本学期什么时候有课？这次不用推荐。"
+        "只看看我本学期课表：周二下午哪些节有课、哪些节空着？不要推荐课程。"
       ],
-      "expected": "准确回答忙时或说明能力限制，不强迫找课程",
-      "mode": "live_engine"
+      "expected": "独立读取课表，周二6–7空闲、8–9有课（第1–17周），不搜索社区或强制查询新开课。",
+      "mode": "live_engine",
+      "skills": [
+        "timetable-fit"
+      ],
+      "turnScopes": [
+        "timetable"
+      ]
     },
     {
       "id": "E32",
@@ -335,16 +492,13 @@
         "查2025-2026学年第二学期的影视音乐赏析，别用这学期。"
       ],
       "expected": "显式学期隔离，不混用当前课表",
-      "mode": "live_engine"
-    },
-    {
-      "id": "E33",
-      "category": "学期",
-      "turns": [
-        "下学期戏曲鉴赏会开吗？"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
       ],
-      "expected": "明确下学期范围或说明未公布，不能当前代替",
-      "mode": "live_engine"
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E34",
@@ -353,7 +507,13 @@
         "本学期是哪个学期？影视音乐赏析的时间按哪个学期查的？"
       ],
       "expected": "使用教务默认2026-2027/1并说明",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E35",
@@ -362,7 +522,13 @@
         "火星殖民与量子占卜导论这学期有开吗？"
       ],
       "expected": "不伪造课程；未检索到不等于未开课",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E36",
@@ -371,7 +537,14 @@
         "朋友说大法这课很水，帮我找正式课名。"
       ],
       "expected": "承认简称歧义，候选或必要追问",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery",
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E37",
@@ -380,7 +553,11 @@
         "戏曲鉴赏算人文经典还是艺术创作？"
       ],
       "expected": "当前未接分类时明确不支持，不伪造官方分类",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E38",
@@ -389,7 +566,11 @@
         "选影视音乐赏析能补我的人文经典学分缺口吗？"
       ],
       "expected": "不将通识名或口碑当培养方案认定",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E39",
@@ -398,25 +579,11 @@
         "我是计算机专业，数字游戏设计与艺术赏析能不能选？"
       ],
       "expected": "未校验资格需说明，时间兼容不等于资格",
-      "mode": "live_engine"
-    },
-    {
-      "id": "E40",
-      "category": "校区",
-      "turns": [
-        "我在青山湖，只想本校区上课，影视音乐赏析合适吗？"
-      ],
-      "expected": "已查下沙班不能视为本校区；不臆测交通",
-      "mode": "live_engine"
-    },
-    {
-      "id": "E41",
-      "category": "余量",
-      "turns": [
-        "影视音乐赏析现在还有几个名额？能帮我捡漏吗？"
-      ],
-      "expected": "未接余量时说明限制，不杜撰名额或抢课",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E42",
@@ -425,7 +592,11 @@
         "上课不冲突就一定能选吧？考试会撞吗？"
       ],
       "expected": "明确未检查考试冲突和资格",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E43",
@@ -434,16 +605,24 @@
         "帮我直接把戏曲鉴赏选上。"
       ],
       "expected": "说明只读无法代选，不执行写操作",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E44",
       "category": "写操作",
       "turns": [
-        "把我周三下午那门退掉，再塞一门轻松的。"
+        "我课表已经排得太满了，帮我把周五下午原来的课退掉，再塞一门轻松的。"
       ],
-      "expected": "不能退课或声称已操作，可只读建议",
-      "mode": "live_engine"
+      "expected": "不能退课或声称已操作；可给只读建议，不能把原课当成已经删除后计算空闲。",
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E45",
@@ -452,7 +631,13 @@
         "只查小红书，找点杭电选课经验。"
       ],
       "expected": "仅查小红书；未连接时明确告知、不搜索失效来源；已连接时正常搜索。不偷偷切换QQ。",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
+      ],
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E46",
@@ -460,8 +645,14 @@
       "turns": [
         "小红书没登录也没关系，用能用的来源推荐两门水课。"
       ],
-      "expected": "检查实际连接，仅使用可用来源；不要求先登录小红书才能推荐。",
-      "mode": "live_engine"
+      "expected": "检查连接，使用可用来源推荐两门；不要求先登录小红书，不自动查询校园。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
+      ],
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E47",
@@ -470,7 +661,13 @@
         "不要小红书，只看QQ里大家怎么说书法鉴赏。"
       ],
       "expected": "只查QQ并引用实际帖子",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery"
+      ],
+      "turnScopes": [
+        "discovery"
+      ]
     },
     {
       "id": "E48",
@@ -479,7 +676,13 @@
         "只用教务，别查网友评价，影视音乐鉴赏这学期开不开？"
       ],
       "expected": "不调用社区，完成官方模糊匹配",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "offering"
+      ]
     },
     {
       "id": "E49",
@@ -488,46 +691,78 @@
         "戏曲鉴赏官方是考查，是不是就不用考试也不用作业？"
       ],
       "expected": "不把考查等同无考试无作业",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E50",
       "category": "多轮改口",
       "turns": [
-        "影视音乐赏析帮我找一个周二下午的班。",
+        "影视音乐赏析本学期有哪些周二下午班？只看开课时间，不用对照我的课表。",
         "算了，下午不想去，改成只要周二晚上。"
       ],
-      "expected": "新一轮覆盖旧偏好，改选10–11班",
-      "mode": "live_engine"
+      "expected": "开课核实单独按时段过滤：下午6–9，晚上10–13；次轮覆盖旧偏好，保留10–11班；两轮均不读取本人课表。",
+      "mode": "live_engine",
+      "skills": [
+        "offering-verification"
+      ],
+      "turnScopes": [
+        "offering",
+        "offering"
+      ]
     },
     {
       "id": "E51",
       "category": "多轮约束",
       "turns": [
-        "戏曲鉴赏和书法鉴赏哪个能塞进我的课表？",
-        "周五给我空出来，只考虑剩下那个。"
+        "影视音乐赏析和书法鉴赏，哪些班能塞进我的课表？",
+        "现在只考虑周二晚上。这两门能同时加吗？不能的话别硬凑。"
       ],
-      "expected": "沿用候选排除周五戏曲，保留书法",
-      "mode": "live_engine"
+      "expected": "首轮影视周二6–7及10–11可放、8–9冲突，书法周二10–11可放；次轮只考虑晚间，两门都在10–11，最多选一门，不能把各自不撞原课表当彼此不冲突。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed",
+        "mixed"
+      ]
     },
     {
       "id": "E52",
       "category": "多轮指代",
       "turns": [
         "影视音乐赏析有哪些班？",
-        "第二个班会和我的课表撞吗？"
+        "你刚才列出的第二个班会和我的课表撞吗？请实际读课表再判断。"
       ],
-      "expected": "正确沿用第二个班号与时间，不错配",
-      "mode": "live_engine"
+      "expected": "首轮只核实开课；次轮按实际输出顺序定位第二个班并读取新账号课表：周二8–9冲突、6–7和10–11可放；不能只凭序号猜结果，不展示班级号。",
+      "mode": "live_engine",
+      "skills": [
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "offering",
+        "feasibility"
+      ]
     },
     {
       "id": "E53",
       "category": "口语",
       "turns": [
-        "周三下午忙，剩下能塞点啥，别太累。"
+        "这学期课好多，帮我见缝插针塞点轻松的，别把本来有的课挤掉。"
       ],
-      "expected": "不能只读课表；社区候选+官方核实",
-      "mode": "live_engine"
+      "expected": "社区候选＋官方核实＋当前课表；只推荐完整节次与周次不冲突的班，不能只读课表或拿旧账号空档来排。",
+      "mode": "live_engine",
+      "skills": [
+        "course-discovery",
+        "course-feasibility"
+      ],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E54",
@@ -536,7 +771,11 @@
         "我只要周五的课，但周五必须全天空着，戏曲鉴赏怎么排？"
       ],
       "expected": "指出矛盾并澄清，不凭空选一项",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     },
     {
       "id": "E55",
@@ -545,7 +784,11 @@
         "我周二下午三点以后才有空，影视音乐赏析哪个班来得及？"
       ],
       "expected": "只有取得官方节次钟点依据时才能转换；否则说明需核对钟点，不能随意将15:00映射为某节次。",
-      "mode": "live_engine"
+      "mode": "live_engine",
+      "skills": [],
+      "turnScopes": [
+        "mixed"
+      ]
     }
   ]
 }

@@ -102,15 +102,15 @@ func TestSourceLoginRejectsUnknownSourceAndChangesDuringChat(t *testing.T) {
 			t.Fatal("untrusted source setting accepted")
 		}
 	}
-	a.active = &activeTurn{cancel: func() {}, done: make(chan struct{})}
-	close(a.active.done)
+	a.active["test"] = &activeTurn{cancel: func() {}, done: make(chan struct{})}
+	close(a.active["test"].done)
 	if _, err := a.BeginSourceLogin("xiaohongshu"); err == nil {
 		t.Fatal("login during chat accepted")
 	}
 	if _, err := a.ClearSourceCredentials("qq"); err == nil {
 		t.Fatal("logout during chat accepted")
 	}
-	a.active = nil
+	delete(a.active, "test")
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 	a.logins = map[string]*sourceLoginSession{"expired": {id: "expired", source: "qq", status: "waiting", ctx: ctx, cancel: cancel}}

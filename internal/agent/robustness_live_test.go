@@ -2,11 +2,13 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,13 +21,17 @@ import (
 )
 
 type studentCase struct {
-	ID       string   `json:"id"`
-	Category string   `json:"category"`
-	Turns    []string `json:"turns"`
-	Expected string   `json:"expected"`
-	Mode     string   `json:"mode"`
+	Skills     []string `json:"skills"`
+	TurnScopes []string `json:"turnScopes"`
+	ID         string   `json:"id"`
+	Category   string   `json:"category"`
+	Turns      []string `json:"turns"`
+	Expected   string   `json:"expected"`
+	Mode       string   `json:"mode"`
 }
 type studentTurnResult struct {
+	Actions     []string          `json:"actions"`
+	Scope       string            `json:"scope"`
 	Question    string            `json:"question"`
 	Answer      string            `json:"answer"`
 	Error       string            `json:"error,omitempty"`
@@ -67,10 +73,32 @@ func TestLiveStudentQuestionDataset(t *testing.T) {
 	if json.Unmarshal(data, &dataset) != nil {
 		t.Fatal("invalid dataset")
 	}
-	dir := filepath.Join(root, "logs", "robustness-20260913")
+	run := os.Getenv("HDU_STATION_QA_RUN")
+	if run == "" {
+		run = "skills-qa-" + time.Now().Format("20060102-150405.000000000")
+	}
+	if filepath.Base(run) != run || run == "." || run == ".." {
+		t.Fatal("QA run must be a directory name")
+	}
+	workers := 10
+	if raw := os.Getenv("HDU_STATION_QA_WORKERS"); raw != "" {
+		workers, err = strconv.Atoi(raw)
+		if err != nil || workers < 1 || workers > 10 {
+			t.Fatal("QA workers must be 1..10")
+		}
+	}
+	dir := filepath.Join(root, "logs", run)
 	if os.MkdirAll(dir, 0700) != nil {
 		t.Fatal("cannot create report directory")
 	}
+	snapshot := filepath.Join(dir, "questions.json")
+	if prior, e := os.ReadFile(snapshot); e == nil && !bytes.Equal(prior, data) {
+		t.Fatal("cannot mix different questionnaires in one run")
+	}
+	if err := os.WriteFile(snapshot, data, 0600); err != nil {
+		t.Fatal("cannot save question snapshot")
+	}
+	fmt.Printf("QA run=%s workers=%d cases=%d\n", run, workers, len(dataset.Cases))
 	out := filepath.Join(dir, "live-results.jsonl")
 	selected := os.Getenv("HDU_STATION_QA_CASES")
 	done := map[string]bool{}
@@ -96,13 +124,13 @@ func TestLiveStudentQuestionDataset(t *testing.T) {
 	engine := Engine{Model: cfg.Model, Client: client, Sources: cfg.Sources, Campus: tools.NewCampusClient(campus)}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	slots := make(chan struct{}, 2)
+	slots := make(chan struct{}, workers)
 	for _, c := range dataset.Cases {
 		if selected == "" {
-			if c.Mode != "live_engine" || done[c.ID] {
+			if done[c.ID] {
 				continue
 			}
-		} else if !strings.Contains(","+selected+",", ","+c.ID+",") {
+		} else if selected != "all" && !strings.Contains(","+selected+",", ","+c.ID+",") {
 			continue
 		}
 		slots <- struct{}{}
@@ -112,16 +140,39 @@ func TestLiveStudentQuestionDataset(t *testing.T) {
 			defer func() { <-slots }()
 			history := []storage.Message{}
 			turns := []studentTurnResult{}
-			for _, q := range c.Turns {
+			for turnIndex, q := range c.Turns {
 				history = append(history, storage.Message{Role: "user", State: "complete", Content: q})
 				start := time.Now()
 				statuses := []string{}
 				r, e := engine.Answer(context.Background(), history, func(ev Event) {
 					if ev.Kind == "status" {
 						statuses = append(statuses, ev.Text)
+						if os.Getenv("HDU_STATION_QA_PROGRESS") == "1" {
+							fmt.Printf("QA %s status=%s\n", c.ID, ev.Text)
+						}
 					}
 				})
-				row := studentTurnResult{Question: q, Answer: r.Text, Seconds: time.Since(start).Seconds(), Searches: r.Searches, Reads: r.Reads, CampusCalls: r.CampusCalls, Connections: r.Connections, Statuses: statuses, Flags: []string{}}
+				scope := "mixed"
+				if turnIndex < len(c.TurnScopes) {
+					scope = c.TurnScopes[turnIndex]
+				}
+				row := studentTurnResult{Actions: r.Actions, Scope: scope, Question: q, Answer: r.Text, Seconds: time.Since(start).Seconds(), Searches: r.Searches, Reads: r.Reads, CampusCalls: r.CampusCalls, Connections: r.Connections, Statuses: statuses, Flags: []string{}}
+				if scope == "discovery" && r.CampusCalls > 0 {
+					row.Flags = append(row.Flags, "unrequested_campus")
+				}
+				if scope == "offering" || scope == "timetable" {
+					if r.Searches > 0 || r.Reads > 0 {
+						row.Flags = append(row.Flags, "unrequested_community")
+					}
+				}
+				if scope == "offering" || scope == "discovery+offering" {
+					for _, status := range statuses {
+						if strings.Contains(status, "读取本人课表") {
+							row.Flags = append(row.Flags, "unrequested_timetable")
+							break
+						}
+					}
+				}
 				if e != nil {
 					row.Error = e.Error()
 					row.Flags = append(row.Flags, "request_error")
@@ -156,7 +207,7 @@ func TestLiveStudentQuestionDataset(t *testing.T) {
 				At       string              `json:"at"`
 				Mode     string              `json:"mode"`
 				Turns    []studentTurnResult `json:"turns"`
-			}{c.ID, c.Category, c.Expected, time.Now().Format(time.RFC3339), "live_engine_2_workers", turns}
+			}{c.ID, c.Category, c.Expected, time.Now().Format(time.RFC3339), fmt.Sprintf("live_engine_%d_workers", workers), turns}
 			b, _ := json.Marshal(record)
 			mu.Lock()
 			defer mu.Unlock()

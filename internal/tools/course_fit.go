@@ -10,9 +10,10 @@ import (
 )
 
 type FitCoursesInput struct {
+	TimeOfDay       []string        `json:"timeOfDay,omitempty" jsonschema:"description=用户允许的时段：morning上午1–5节、afternoon下午6–9节、evening晚上10–13节；多项取并集，与allowedSections同传取交集"`
 	CoreKeywords    []CourseKeyword `json:"coreKeywords,omitempty" jsonschema:"description=模糊课程名的核心词，规则同 check_course_offerings"`
 	CourseIDs       []string        `json:"courseIDs,omitempty" jsonschema:"description=从开课工具候选中选定的课程号，可保留多个近似候选；只检查选定课程号的教学班"`
-	Courses         []string        `json:"courses,omitempty" jsonschema:"description=待放入课表的完整课程名，最多12门；省略时只读取本人课表占用时段，再搜索候选课程后调用本工具验证"`
+	Courses         []string        `json:"courses,omitempty" jsonschema:"description=待放入课表的完整课程名，最多12门；省略时单独读取本人课表占用时段，不要求再找课程"`
 	SchoolYear      string          `json:"schoolYear,omitempty" jsonschema:"description=明确学年时传 YYYY-YYYY，与 semester 同传；本学期省略"`
 	Semester        int             `json:"semester,omitempty" jsonschema:"description=1、2或3，与 schoolYear 同传"`
 	AllowedDays     []int           `json:"allowedDays,omitempty" jsonschema:"description=用户允许上课的星期，周一1到周日7，省略不限制；不要自行添加偏好"`
@@ -210,6 +211,13 @@ func fitCourse(o Offering, schedule scheduleResult, in FitCoursesInput) CourseFi
 func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (result FitCoursesResult, err error) {
 	s.Calls++
 	s.scheduleRequested = true
+	if len(in.TimeOfDay) > 0 {
+		sections, timeErr := sectionsForTimeOfDay(in.TimeOfDay, in.AllowedSections)
+		if timeErr != nil {
+			return result, timeErr
+		}
+		in.AllowedSections = sections
+	}
 	if in.AllowedDays == nil {
 		in.AllowedDays = s.fitPreferences.AllowedDays
 	}
@@ -223,7 +231,6 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 		in.Courses, in.CoreKeywords, in.CourseIDs = s.lastInput.Courses, s.lastInput.CoreKeywords, s.lastInput.CourseIDs
 		in.SchoolYear, in.Semester = s.lastOfferings.Term.SchoolYear, s.lastOfferings.Term.Semester
 	}
-	s.requiredTool = ""
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 	result = FitCoursesResult{CheckedAt: time.Now().Format(time.RFC3339), BusyTimes: []CourseTime{}, Fits: []CourseFit{}, Warnings: []string{"仅按教务课表核对整学期的周次、星期、节次；未校验选课资格、余量、考试冲突或跨校区通勤。fits表示单门与原课表兼容；suggestedPlan是一组相互无冲突且每个课程号最多一个班的候选组合，不是已选课，也不是最优方案。"}}
@@ -267,7 +274,6 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 		result.Warnings = append(result.Warnings, "教务返回该学期空课表，请确认学期及尚未同步的选课；空闲判断仅基于此次返回。")
 	}
 	if len(names) == 0 {
-		result.Warnings = append(result.Warnings, "先从社区讨论获取具体候选课程，再传课程名调用本工具；不能仅凭忙闲时段编造可塞入的课程。")
 		return result, nil
 	}
 	// Both reads use exactly the resolved term, even if defaults change mid-turn.
@@ -275,7 +281,6 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 	offerings, err := s.offerings(ctx, input)
 	offerings.TermSource = result.TermSource
 	result.Offerings = &offerings
-	s.requireSelection(offerings, "fit_courses_to_schedule")
 	if err != nil {
 		return result, err
 	}
@@ -318,4 +323,29 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 		return result, ctx.Err()
 	}
 	return result, nil
+}
+
+// Convert the product's named time blocks once, rather than asking the model
+// to repeatedly enumerate periods. Explicit sections further narrow the range.
+func sectionsForTimeOfDay(blocks []string, explicit []int) ([]int, error) {
+	selected := map[int]bool{}
+	for _, block := range blocks {
+		bounds, ok := map[string][2]int{"morning": {1, 5}, "afternoon": {6, 9}, "evening": {10, 13}}[block]
+		if !ok {
+			return nil, errors.New("时段须为 morning、afternoon 或 evening")
+		}
+		for n := bounds[0]; n <= bounds[1]; n++ {
+			selected[n] = true
+		}
+	}
+	sections := []int{}
+	for n := 1; n <= 13; n++ {
+		if selected[n] && containsAll(explicit, []int{n}) {
+			sections = append(sections, n)
+		}
+	}
+	if len(sections) == 0 {
+		return nil, errors.New("指定时段与节次没有交集，请确认时间条件")
+	}
+	return sections, nil
 }

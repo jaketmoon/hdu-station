@@ -71,6 +71,9 @@ type TurnResult struct {
 	Message      storage.Message      `json:"message"`
 	Error        string               `json:"error,omitempty"`
 }
+
+const maxConcurrentConversations = 10
+
 type activeTurn struct {
 	id, conversationID string
 	cancel             context.CancelFunc
@@ -88,7 +91,8 @@ type App struct {
 	client            *tools.Client
 	campus            *campusauth.Client
 	openCampusBrowser func(string) error
-	active            *activeTurn
+	active            map[string]*activeTurn
+	closing           bool
 	sourceLinks       map[string]string
 	emit              func(TurnEvent)
 	answer            func(context.Context, config.Model, []storage.Message, func(agent.Event)) (agent.Result, error)
@@ -135,7 +139,7 @@ func createApplicationAt(root string) (*App, error) {
 	if err != nil {
 		return nil, errors.New("无法打开本机对话记录")
 	}
-	a := &App{ctx: context.Background(), root: root, cfg: cfg, store: store, client: tools.NewClient(root), campus: campus, sourceLinks: map[string]string{}, emit: func(TurnEvent) {}}
+	a := &App{ctx: context.Background(), root: root, cfg: cfg, store: store, client: tools.NewClient(root), campus: campus, sourceLinks: map[string]string{}, active: map[string]*activeTurn{}, emit: func(TurnEvent) {}}
 	a.openCampusBrowser = func(address string) error {
 		if !campusauth.Supported(runtime.GOOS) {
 			return errors.New("当前平台暂不支持校园网页授权")
@@ -156,20 +160,24 @@ func (a *App) startup(ctx context.Context) {
 	a.emit = func(e TurnEvent) { wails.EventsEmit(ctx, "course:turn", e) }
 }
 func (a *App) shutdown(context.Context) {
-	a.campus.Close()
 	a.mu.Lock()
+	a.closing = true
 	for _, login := range a.logins {
 		login.cancel()
 	}
-	turn := a.active
-	if turn != nil {
+	turns := make([]*activeTurn, 0, len(a.active))
+	for _, turn := range a.active {
 		turn.cancel()
+		turns = append(turns, turn)
 	}
 	a.mu.Unlock()
-	if turn != nil {
+	a.campus.Close()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for _, turn := range turns {
 		select {
 		case <-turn.done:
-		case <-time.After(5 * time.Second):
+		case <-deadline.C:
 			return
 		}
 	}
@@ -208,7 +216,7 @@ func (a *App) SaveSettings(in SettingsInput) (Settings, error) {
 	a.sourceMu.Lock()
 	defer a.sourceMu.Unlock()
 	a.mu.Lock()
-	if a.active != nil {
+	if len(a.active) > 0 {
 		a.mu.Unlock()
 		return Settings{}, errors.New("请等当前回答结束后再修改设置")
 	}
@@ -256,7 +264,7 @@ func (a *App) SaveSettings(in SettingsInput) (Settings, error) {
 }
 func (a *App) InstallQQ() (Settings, error) {
 	a.mu.Lock()
-	if a.active != nil {
+	if len(a.active) > 0 {
 		a.mu.Unlock()
 		return Settings{}, errors.New("请等当前回答结束后再安装连接组件")
 	}
@@ -274,16 +282,18 @@ func (a *App) GetMessages(id string) ([]storage.Message, error) { return a.store
 func (a *App) DeleteConversation(id string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.active != nil && a.active.conversationID == id {
-		return errors.New("请先停止这条对话的回答")
+	for _, turn := range a.active {
+		if turn.conversationID == id {
+			return errors.New("请先停止这条对话的回答")
+		}
 	}
 	return a.store.Delete(a.ctx, id)
 }
 func (a *App) Cancel(requestID string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.active != nil && a.active.id == requestID {
-		a.active.cancel()
+	if turn := a.active[requestID]; turn != nil {
+		turn.cancel()
 	}
 }
 func (a *App) Chat(conversationID, question, requestID string) (TurnResult, error) {
@@ -303,9 +313,23 @@ func (a *App) Chat(conversationID, question, requestID string) (TurnResult, erro
 		a.mu.Unlock()
 		return TurnResult{}, errors.New("请先完成或取消校园网页授权")
 	}
-	if a.active != nil {
+	if a.closing {
 		a.mu.Unlock()
-		return TurnResult{}, errors.New("已有一个问题正在回答，请稍等或停止")
+		return TurnResult{}, errors.New("应用正在关闭")
+	}
+	if a.active[requestID] != nil {
+		a.mu.Unlock()
+		return TurnResult{}, errors.New("这个请求正在回答中")
+	}
+	for _, turn := range a.active {
+		if conversationID != "" && turn.conversationID == conversationID {
+			a.mu.Unlock()
+			return TurnResult{}, errors.New("这条对话正在回答，请稍等或停止")
+		}
+	}
+	if len(a.active) >= maxConcurrentConversations {
+		a.mu.Unlock()
+		return TurnResult{}, errors.New("最多同时运行 10 个对话，请等一个回答结束后再发送")
 	}
 	if a.cfg.Model.APIKey == "" {
 		a.mu.Unlock()
@@ -313,15 +337,22 @@ func (a *App) Chat(conversationID, question, requestID string) (TurnResult, erro
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
 	turn := &activeTurn{id: requestID, conversationID: conversationID, cancel: cancel, done: make(chan struct{})}
-	a.active = turn
+	a.active[requestID] = turn
 	model := a.cfg.Model
-	a.mu.Unlock()
-	defer func() { cancel(); a.mu.Lock(); a.active = nil; a.mu.Unlock(); close(turn.done) }()
+	defer func() {
+		cancel()
+		a.mu.Lock()
+		delete(a.active, requestID)
+		close(turn.done)
+		a.mu.Unlock()
+	}()
+	// Publish the new conversation and its active reservation together. Otherwise
+	// a concurrent history refresh could submit to its ID before it is reserved.
 	conversation, user, assistant, err := a.store.Begin(ctx, conversationID, question)
 	if err != nil {
+		a.mu.Unlock()
 		return TurnResult{}, errors.New("未能保存问题，请重试")
 	}
-	a.mu.Lock()
 	turn.conversationID = conversation.ID
 	a.mu.Unlock()
 	a.emit(TurnEvent{Kind: "start", RequestID: requestID, ConversationID: conversation.ID, Conversation: &conversation, User: &user, Assistant: &assistant})

@@ -92,7 +92,7 @@ func TestLayeredLookupGroupsCourseIDsAndModelCanSelectSeveral(t *testing.T) {
 		t.Fatal("lookup failed")
 	}
 	q := result.Queries[0]
-	if !q.NeedsSelection || s.RequiredTool() != "check_course_offerings" {
+	if !q.NeedsSelection {
 		t.Fatal("fuzzy match did not require model selection")
 	}
 	if !reflect.DeepEqual(words, []string{"影视音乐鉴赏", "影视音乐"}) || len(q.Classes) != 0 || len(q.Candidates) != 2 || len(q.Candidates[0].Classes) != 2 || q.Candidates[0].CourseID != "001" {
@@ -100,7 +100,7 @@ func TestLayeredLookupGroupsCourseIDsAndModelCanSelectSeveral(t *testing.T) {
 	}
 	in.CourseIDs = []string{"001", "002"}
 	selected, _ := s.CheckOfferings(context.Background(), in)
-	if selected.Queries[0].NeedsSelection || s.RequiredTool() != "show_course_results" {
+	if selected.Queries[0].NeedsSelection {
 		t.Fatal("confirmed IDs left a stale selection requirement")
 	}
 	if len(selected.Queries[0].Classes) != 3 || len(words) != 2 {
@@ -178,10 +178,10 @@ func TestFitReadsAllPagesAndBuildsMutuallyCompatiblePlan(t *testing.T) {
 	for _, f := range r.Fits {
 		found := false
 		for _, line := range strings.Split(display, "\n") {
-			if strings.HasPrefix(line, "|") && strings.Contains(line, f.Offering.ClassID) {
+			if strings.HasPrefix(line, "|") && strings.Contains(line, f.Offering.CourseName) && strings.Contains(line, f.Offering.ClassTime) {
 				found = true
 				if !strings.Contains(line, f.Offering.ClassTime) {
-					t.Fatal("official class ID paired with a different time")
+					t.Fatal("official course paired with a different time")
 				}
 				if f.Status == "conflict" && !strings.Contains(line, "与已选课程冲突") {
 					t.Fatal("computed conflict lost in display")

@@ -34,7 +34,7 @@ func TestSafeErrorKeepsCategoryWithoutUpstreamDetails(t *testing.T) {
 	}
 }
 
-func TestPrematureShowReturnsToAgentAndCannotLeakInternalWarnings(t *testing.T) {
+func TestPrematureShowDoesNotForceUnrequestedDiscovery(t *testing.T) {
 	rounds := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rounds++
@@ -48,7 +48,7 @@ func TestPrematureShowReturnsToAgentAndCannotLeakInternalWarnings(t *testing.T) 
 	defer server.Close()
 	e := Engine{Model: config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}}
 	r, err := e.Answer(context.Background(), []storage.Message{{Role: "user", State: "complete", Content: "按本人课表推荐影视音乐鉴赏"}}, nil)
-	if err != nil || rounds != 6 || strings.Contains(r.Text, "suggestedPlan") || strings.Contains(r.Text, "先从社区") {
+	if err != nil || rounds != 2 || strings.Contains(r.Text, "suggestedPlan") || strings.Contains(r.Text, "先从社区") {
 		t.Fatalf("premature completion escaped guard: rounds=%d err=%v", rounds, err)
 	}
 }

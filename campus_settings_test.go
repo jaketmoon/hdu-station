@@ -47,14 +47,14 @@ func TestCampusWebSettingsKeepCredentialsPrivateAndLogoutIsPersistent(t *testing
 
 func TestCampusAccountChangesAreBlockedDuringAnAnswer(t *testing.T) {
 	a := testApp(t)
-	a.active = &activeTurn{}
+	a.active["test"] = &activeTurn{cancel: func() {}, done: make(chan struct{})}
 	if _, err := a.BeginCampusLogin(); err == nil {
 		t.Fatal("authorization allowed during an answer")
 	}
 	if _, err := a.LogoutCampus(); err == nil {
 		t.Fatal("logout allowed during an answer")
 	}
-	a.active = nil
+	delete(a.active, "test")
 	a.openCampusBrowser = nil
 	if _, err := a.BeginCampusLogin(); err == nil {
 		t.Fatal("unavailable browser accepted")

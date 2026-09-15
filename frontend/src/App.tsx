@@ -43,12 +43,14 @@ const suggestions: {
     icon: "book",
   },
 ];
+const maxConcurrentConversations = 10;
 type Active = {
   requestId: string;
   conversationId: string;
   user: Message;
   assistant: Message;
   phase: string;
+  stopping?: boolean;
 };
 function mergeMessages(previous: Message[], incoming: Message[]) {
   const ids = new Set(incoming.map((item) => item.id));
@@ -61,8 +63,8 @@ export default function App() {
   const selectedRef = useRef("");
   const [history, setHistory] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
-  const [active, setActive] = useState<Active | null>(null);
-  const activeRef = useRef<Active | null>(null);
+  const [active, setActive] = useState<Record<string, Active>>({});
+  const activeRef = useRef<Record<string, Active>>({});
   const [settings, setSettings] = useState<Settings | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -70,14 +72,20 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState("");
   const [jump, setJump] = useState(false);
-  const [stopping, setStopping] = useState(false);
   const timeline = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const follow = useRef(true);
   const loadSequence = useRef(0);
-  const updateActive = useCallback((next: Active | null) => {
-    activeRef.current = next;
-    setActive(next);
+  const updateActive = useCallback((next: Active) => {
+    const turns = { ...activeRef.current, [next.requestId]: next };
+    activeRef.current = turns;
+    setActive(turns);
+  }, []);
+  const removeActive = useCallback((requestId: string) => {
+    const turns = { ...activeRef.current };
+    delete turns[requestId];
+    activeRef.current = turns;
+    setActive(turns);
   }, []);
   const select = useCallback((id: string) => {
     selectedRef.current = id;
@@ -105,8 +113,8 @@ export default function App() {
       })
       .catch(() => {});
     const unsubscribe = api.subscribe((event: TurnEvent) => {
-      const current = activeRef.current;
-      if (!current || event.requestId !== current.requestId) return;
+      const current = activeRef.current[event.requestId];
+      if (!current) return;
       if (
         event.kind === "start" &&
         event.conversation &&
@@ -154,7 +162,7 @@ export default function App() {
 
   useEffect(() => {
     const sequence = ++loadSequence.current;
-    if (!selected) {
+    if (!selected || selected.startsWith("pending-")) {
       setLoading(false);
       return;
     }
@@ -190,16 +198,33 @@ export default function App() {
 
   async function send(text = draft) {
     text = text.trim();
-    if (!text || activeRef.current || text.length > 4000) return;
+    const turns = Object.values(activeRef.current);
+    if (
+      !text ||
+      text.length > 4000 ||
+      turns.some((turn) => turn.conversationId === selectedRef.current)
+    )
+      return;
+    if (turns.length >= maxConcurrentConversations) {
+      setError("最多同时运行 10 个对话，请等一个回答结束后再发送。");
+      return;
+    }
     if (settings && !settings.hasAPIKey) {
       setDraft(text);
       setShowSettings(true);
       return;
     }
     const requestId = crypto.randomUUID();
+    const conversationId = selectedRef.current;
+    // A new chat gets its own local identity before the backend start event.
+    const displayId = conversationId || "pending-" + requestId;
+    if (!conversationId) {
+      selectedRef.current = displayId;
+      setSelected(displayId);
+    }
     const empty: Message = {
       id: "pending-" + requestId,
-      conversationId: selectedRef.current,
+      conversationId: displayId,
       role: "assistant",
       content: "",
       state: "streaming",
@@ -207,7 +232,7 @@ export default function App() {
     };
     updateActive({
       requestId,
-      conversationId: selectedRef.current,
+      conversationId: displayId,
       user: {
         ...empty,
         id: "user-" + requestId,
@@ -220,13 +245,19 @@ export default function App() {
     });
     setDraft("");
     setError("");
-    setStopping(false);
     follow.current = true;
     try {
-      const result = await api.chat(selectedRef.current, text, requestId);
-      if (selectedRef.current === result.conversation.id) {
+      const result = await api.chat(conversationId, text, requestId);
+      if (
+        selectedRef.current === displayId ||
+        selectedRef.current === result.conversation.id
+      ) {
+        if (selectedRef.current !== result.conversation.id) {
+          selectedRef.current = result.conversation.id;
+          setSelected(result.conversation.id);
+        }
         ++loadSequence.current;
-        const user = (activeRef.current as Active | null)?.user;
+        const user = activeRef.current[requestId]?.user;
         setHistory((items) =>
           mergeMessages(
             items,
@@ -241,23 +272,35 @@ export default function App() {
         ...items.filter((item) => item.id !== result.conversation.id),
       ]);
     } catch (error) {
-      setError(errorText(error));
-      setDraft((value) => value || text);
+      const current = activeRef.current[requestId];
+      if (current?.conversationId === selectedRef.current) {
+        setError(errorText(error));
+        setDraft((value) => value || text);
+        if (!conversationId && current.conversationId === displayId) {
+          selectedRef.current = "";
+          setSelected("");
+        }
+      }
     } finally {
-      if ((activeRef.current as Active | null)?.requestId === requestId)
-        updateActive(null);
-      setStopping(false);
-      composer.current?.focus();
+      const wasSelected =
+        activeRef.current[requestId]?.conversationId === selectedRef.current;
+      removeActive(requestId);
+      if (wasSelected) composer.current?.focus();
     }
   }
   async function stop() {
-    if (!activeRef.current || stopping) return;
-    setStopping(true);
+    const current = Object.values(activeRef.current).find(
+      (turn) => turn.conversationId === selectedRef.current,
+    );
+    if (!current || current.stopping) return;
+    updateActive({ ...current, stopping: true });
     try {
-      await api.cancel(activeRef.current.requestId);
+      await api.cancel(current.requestId);
     } catch (error) {
-      setError(errorText(error));
-      setStopping(false);
+      const remaining = activeRef.current[current.requestId];
+      if (remaining) updateActive({ ...remaining, stopping: false });
+      if (selectedRef.current === current.conversationId)
+        setError(errorText(error));
     }
   }
   async function remove(id: string) {
@@ -277,7 +320,10 @@ export default function App() {
       setError("暂时无法复制，请选中文字复制。");
     }
   }
-  const live = active?.conversationId === selected ? active : null;
+  const turns = Object.values(active);
+  const live = turns.find((turn) => turn.conversationId === selected);
+  const atCapacity = turns.length >= maxConcurrentConversations;
+  const otherTurns = turns.filter((turn) => turn.conversationId !== selected);
   const messages = live
     ? mergeMessages(history, [live.user, live.assistant])
     : history;
@@ -345,7 +391,7 @@ export default function App() {
               >
                 <Icon name="chat" size={16} />
                 <span>{item.title}</span>
-                {active?.conversationId === item.id && (
+                {turns.some((turn) => turn.conversationId === item.id) && (
                   <span className="history-pulse" />
                 )}
               </button>
@@ -354,7 +400,7 @@ export default function App() {
                 aria-label={`删除对话：${item.title}`}
                 title="删除对话"
                 onClick={() => remove(item.id)}
-                disabled={active?.conversationId === item.id}
+                disabled={turns.some((turn) => turn.conversationId === item.id)}
               >
                 <Icon name="trash" size={15} />
               </button>
@@ -439,7 +485,7 @@ export default function App() {
                     key={item.title}
                     className="suggestion"
                     onClick={() => send(item.question)}
-                    disabled={!!active}
+                    disabled={!!live || atCapacity}
                   >
                     <span className="suggestion-icon">
                       <Icon name={item.icon} size={20} />
@@ -526,7 +572,7 @@ export default function App() {
                           ) && (
                             <button
                               className="text-button"
-                              disabled={!!active}
+                              disabled={!!live || atCapacity}
                               onClick={() => {
                                 const index = messages.indexOf(message);
                                 const question = messages
@@ -570,16 +616,17 @@ export default function App() {
               </button>
             </div>
           )}
-          {active && !live && (
+          {otherTurns.length > 0 && (
             <button
               className="other-turn"
-              onClick={() => select(active.conversationId)}
+              onClick={() => select(otherTurns[0].conversationId)}
             >
-              另一条对话正在回答，点击查看 <Icon name="right" size={15} />
+              另有 {otherTurns.length} 个对话正在回答（最多 10 个），点击查看{" "}
+              <Icon name="right" size={15} />
             </button>
           )}
           <form
-            className={`composer ${active ? "is-busy" : ""}`}
+            className={`composer ${live ? "is-busy" : ""}`}
             onSubmit={(event) => {
               event.preventDefault();
               send();
@@ -614,13 +661,13 @@ export default function App() {
                 <Icon name="chat" size={14} />
                 参考同学的真实讨论
               </span>
-              {active ? (
+              {live ? (
                 <button
                   type="button"
                   className="send-button stop-button"
                   aria-label="停止回答"
                   onClick={stop}
-                  disabled={stopping}
+                  disabled={live.stopping}
                 >
                   <span className="stop-square" />
                 </button>
@@ -628,7 +675,7 @@ export default function App() {
                 <button
                   className="send-button"
                   aria-label="发送问题"
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() || atCapacity}
                 >
                   <Icon name="arrow" size={19} />
                 </button>

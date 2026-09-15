@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestScheduleAloneCannotFinishAndLaterReadKeepsCandidates(t *testing.T) {
+func TestScheduleAloneCanFinishAndLaterFitKeepsCandidates(t *testing.T) {
 	s := campusFixture(t, func(r *http.Request) (*http.Response, error) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/config"):
@@ -23,8 +23,8 @@ func TestScheduleAloneCannotFinishAndLaterReadKeepsCandidates(t *testing.T) {
 	ctx := context.Background()
 	_, _ = s.FitCourses(ctx, FitCoursesInput{AllowedDays: []int{1, 2, 3, 4, 6, 7}})
 	text, _ := s.ShowCourses(ctx, ShowCoursesInput{MatchSchedule: true})
-	if text != "" || s.CompletionGap() == "" || s.CanShowCourses() {
-		t.Fatal("schedule-only read ended recommendation")
+	if !strings.Contains(text, "空课表") || !s.CanShowCourses() {
+		t.Fatal("schedule-only request was forced into recommendations")
 	}
 	if strings.Contains(s.Display(), "suggestedPlan") {
 		t.Fatal("internal instructions leaked")
@@ -32,16 +32,16 @@ func TestScheduleAloneCannotFinishAndLaterReadKeepsCandidates(t *testing.T) {
 	_, _ = s.CheckOfferings(ctx, OfferingInput{Courses: []string{"戏曲鉴赏"}})
 	_, _ = s.FitCourses(ctx, FitCoursesInput{})
 	text, _ = s.ShowCourses(ctx, ShowCoursesInput{})
-	if !strings.Contains(text, "friday") || !strings.Contains(text, "不符合指定时间偏好") || strings.Contains(text, "一组可以同时放入") {
+	if !strings.Contains(text, "戏曲鉴赏") || !strings.Contains(text, "不符合指定时间偏好") || strings.Contains(text, "一组可以同时放入") {
 		t.Fatal("schedule reread lost candidates or explicit Friday preference")
 	}
 }
 
-func TestUnresolvedNamesCannotFinish(t *testing.T) {
+func TestUnresolvedNamesCanBeShownWithoutPretendingTheyAreVerified(t *testing.T) {
 	s := NewCampusSession(nil, nil)
 	s.lastOfferings = &OfferingResult{Queries: []OfferingQuery{{Query: "影视音乐", NeedsSelection: true}}}
 	text, _ := s.ShowCourses(context.Background(), ShowCoursesInput{})
-	if text != "" || s.CanShowCourses() {
-		t.Fatal("unresolved name was allowed to finish")
+	if !strings.Contains(text, "尚未匹配") || !s.CanShowCourses() {
+		t.Fatal("candidate-only answer was blocked or falsely confirmed")
 	}
 }

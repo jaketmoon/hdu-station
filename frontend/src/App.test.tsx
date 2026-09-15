@@ -225,3 +225,172 @@ describe("course assistant", () => {
     expect(api.chat).not.toHaveBeenCalled();
   });
 });
+
+function controlledChats() {
+  const pending: {
+    requestId: string;
+    question: string;
+    resolve: (value: TurnResult) => void;
+    reject: (error: Error) => void;
+  }[] = [];
+  vi.mocked(api.chat).mockImplementation(
+    (_id, question, requestId) =>
+      new Promise((resolve, reject) =>
+        pending.push({ requestId, question, resolve, reject }),
+      ),
+  );
+  const start = (index: number) => {
+    const turn = pending[index];
+    const id = `conversation-${index}`;
+    const conversation = { id, title: `问题 ${index}`, updatedAt: "" };
+    const user = {
+      ...message(`u-${index}`, "user", turn.question),
+      conversationId: id,
+    };
+    const assistant = {
+      ...message(`a-${index}`, "assistant", ""),
+      conversationId: id,
+      state: "streaming",
+    };
+    act(() =>
+      event({
+        requestId: turn.requestId,
+        conversationId: id,
+        kind: "start",
+        text: "",
+        conversation,
+        user,
+        assistant,
+      }),
+    );
+    return { conversation, user, assistant };
+  };
+  const delta = (index: number, text: string, kind = "delta") =>
+    act(() =>
+      event({
+        requestId: pending[index].requestId,
+        conversationId: `conversation-${index}`,
+        kind,
+        text,
+      }),
+    );
+  const send = (text: string) => {
+    fireEvent.change(screen.getByRole("textbox", { name: "选课问题" }), {
+      target: { value: text },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  };
+  return { pending, start, delta, send };
+}
+
+describe("parallel conversations", () => {
+  it("streams independently, stops only the selected request, and keeps other requests after completion", async () => {
+    const chats = controlledChats();
+    render(<App />);
+    await waitFor(() => expect(api.settings).toHaveBeenCalled());
+    chats.send("第一条问题");
+    const first = chats.start(0);
+    chats.delta(0, "第一条已有结果");
+    fireEvent.click(screen.getByRole("button", { name: /新对话/ }));
+    chats.send("第二条问题");
+    const second = chats.start(1);
+    chats.delta(1, "第二条已有结果");
+    chats.delta(0, "不能串到第二条");
+    expect(screen.getByText("第二条已有结果")).toBeVisible();
+    expect(screen.queryByText(/不能串到第二条/)).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "选课问题" }), {
+      key: "Enter",
+    });
+    expect(api.chat).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "停止回答" }));
+    expect(api.cancel).toHaveBeenCalledWith(chats.pending[1].requestId);
+    fireEvent.click(screen.getByRole("button", { name: "问题 0" }));
+    expect(screen.getByRole("button", { name: "停止回答" })).toBeEnabled();
+    expect(screen.getByText("第一条已有结果不能串到第二条")).toBeVisible();
+    chats.delta(0, "", "reset");
+    chats.delta(0, "第一条重新汇总");
+    await act(async () =>
+      chats.pending[1].resolve({
+        conversation: second.conversation,
+        message: {
+          ...second.assistant,
+          state: "cancelled",
+          content: "第二条已有结果",
+        },
+      }),
+    );
+    expect(screen.getByText("第一条重新汇总")).toBeVisible();
+    expect(screen.getByRole("button", { name: "停止回答" })).toBeEnabled();
+    await act(async () =>
+      chats.pending[0].resolve({
+        conversation: first.conversation,
+        message: {
+          ...first.assistant,
+          state: "complete",
+          content: "第一条最终回答",
+        },
+      }),
+    );
+    chats.delta(0, "过期事件");
+    expect(screen.getByText("第一条最终回答")).toBeVisible();
+    expect(screen.queryByText("过期事件")).not.toBeInTheDocument();
+  });
+
+  it("allows ten active conversations and enables an eleventh after one finishes", async () => {
+    const chats = controlledChats();
+    render(<App />);
+    await waitFor(() => expect(api.settings).toHaveBeenCalled());
+    let first!: ReturnType<typeof chats.start>;
+    for (let index = 0; index < 10; index++) {
+      chats.send(`并行问题 ${index}`);
+      const started = chats.start(index);
+      if (index === 0) first = started;
+      fireEvent.click(screen.getByRole("button", { name: /新对话/ }));
+    }
+    expect(api.chat).toHaveBeenCalledTimes(10);
+    fireEvent.change(screen.getByRole("textbox", { name: "选课问题" }), {
+      target: { value: "第十一条" },
+    });
+    expect(screen.getByRole("button", { name: "发送问题" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "选课问题" }), {
+      key: "Enter",
+    });
+    expect(api.chat).toHaveBeenCalledTimes(10);
+    await act(async () =>
+      chats.pending[0].resolve({
+        conversation: first.conversation,
+        message: { ...first.assistant, state: "complete", content: "完成" },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "发送问题" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+    expect(api.chat).toHaveBeenCalledTimes(11);
+    expect(api.chat).toHaveBeenLastCalledWith(
+      "",
+      "第十一条",
+      expect.any(String),
+    );
+  });
+
+  it("does not select a late start or restore a background failure into another draft", async () => {
+    const chats = controlledChats();
+    render(<App />);
+    await waitFor(() => expect(api.settings).toHaveBeenCalled());
+    chats.send("慢启动的第一条");
+    fireEvent.click(screen.getByRole("button", { name: /新对话/ }));
+    chats.send("第二条");
+    chats.start(0);
+    expect(screen.getByText("第二条")).toBeVisible();
+    expect(screen.queryByText("慢启动的第一条")).not.toBeInTheDocument();
+    chats.start(1);
+    fireEvent.change(screen.getByRole("textbox", { name: "选课问题" }), {
+      target: { value: "第二条的草稿" },
+    });
+    await act(async () => chats.pending[0].reject(new Error("第一条保存失败")));
+    expect(screen.getByRole("textbox", { name: "选课问题" })).toHaveValue(
+      "第二条的草稿",
+    );
+    expect(screen.queryByText("Error: 第一条保存失败")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "停止回答" })).toBeEnabled();
+  });
+});
