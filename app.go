@@ -17,6 +17,7 @@ import (
 )
 
 type Settings struct {
+	Appearance  config.Appearance   `json:"appearance"`
 	BaseURL     string              `json:"baseURL"`
 	Model       string              `json:"model"`
 	HasAPIKey   bool                `json:"hasAPIKey"`
@@ -190,6 +191,7 @@ func (a *App) GetSettings() Settings {
 	ctx, cancel := context.WithTimeout(a.ctx, 25*time.Second)
 	defer cancel()
 	settings := Settings{BaseURL: c.Model.BaseURL, Model: c.Model.Name, HasAPIKey: c.Model.APIKey != "", DataRoot: a.root,
+		Appearance:  c.Appearance,
 		QQEnabled:   !c.Sources.QQ.Disabled,
 		Zanao:       ZanaoSettings{Enabled: c.Sources.Zanao.Enabled, SchoolAlias: c.Sources.Zanao.SchoolAlias, HasToken: c.Sources.Zanao.Token != ""},
 		Xiaohongshu: XiaohongshuSettings{Enabled: c.Sources.Xiaohongshu.Enabled, BaseURL: c.Sources.Xiaohongshu.BaseURL, HasAuthToken: c.Sources.Xiaohongshu.AuthToken != ""},
@@ -211,6 +213,19 @@ func (a *App) GetSettings() Settings {
 	}()
 	checks.Wait()
 	return settings
+}
+
+// Display-only settings can change during a turn without touching model or source state.
+func (a *App) SaveAppearance(in config.Appearance) (config.Appearance, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	next := a.cfg
+	next.Appearance = in
+	if err := config.Save(a.root, next); err != nil {
+		return a.cfg.Appearance, err
+	}
+	a.cfg = next
+	return in, nil
 }
 func (a *App) SaveSettings(in SettingsInput) (Settings, error) {
 	a.sourceMu.Lock()

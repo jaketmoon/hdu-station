@@ -84,6 +84,10 @@ QQ 和小红书使用同一个可展开来源卡片，折叠时只显示名称�
 
 校园账户数据原子保存至 `campus-auth.yaml`，保留稳定设备 ID、实际批准 scope、期限和 PAT。清除先提交本机空凭证，再通过 `DELETE /cli/tokens/current` 撤销当前 Station 授权；远端失败不会恢复本机凭证。重新授权只在成功保存新 PAT 后撤销 Station 管理的旧 PAT。历史 `campus_key` 仅在尚无新授权文件时兼容读取，不会被自动远端撤销；完成网页授权或本机退出后不会回退到旧令牌。
 
+## 终端显示
+
+终端皮肤在 React 呈现层提供像素 HUD、逐字对话与情报表格，已移除录像带模式、噪点和特效转场。右上角按暖阳田园（`harvest`，浅色）、雾白青瓷（`porcelain`，浅色）、灰紫青绿（`violet`）、青蓝琥珀（`teal`）的顺序循环切换。页面、弹窗和首页杭电大门的 SVG 像素场景共用主题变量，原生控件跟随深浅色模式；新配置与未指定配色的旧配置默认暖阳田园，已有明确选择继续保留。桌面窗口底色与 HTML 首屏由宿主按已保存主题初始化，React 在设置连接检查完成前沿用此主题，避免默认浅色闪到已保存深色；仅向 HTML 注入白名单主题与底色。大门沿用用户照片中的圆孔高塔、玻璃楼梯间、桁架和门柱轮廓，改装为带分段光环、金属面板与导光轨道的赛博入口，后方保留部分高楼与天线；塔身中文校名已移除，材质和灯光随主题切换，随前端离线打包。窄窗口将欢迎语放在场景上方，完整保留高塔。浅色参考 [Solarized Light](https://ethanschoonover.com/solarized/) 的柔和底色与分层思路，采用暖灰、墨绿和青瓷色。暖阳田园参考 [《星露谷物语》官方场景](https://www.stardewvalley.net/)，采用奶油色纸面、木棕色边框、草绿与麦穗金，将相同校门轮廓置于原创像素山丘、木屋、风车和藤蔓花草中。模型内容和 SQLite 原文不因外观变化改变；取消、错误、历史读取及系统减少动态效果时直接显示已接收原文。`SaveAppearance` 在配置锁下只修改 `config.yaml` 的 `appearance.instant_text` 与 `appearance.theme`，允许在生成期间保存，不改写模型与来源设置，不使用 localStorage；保存失败保留原配色。实现与参考见 [终端设计记录](iterations/20260915-katana-zero-terminal.md)。
+
 ## 本机数据与迁移
 
 新版使用独立应用数据根目录 `HDU Station Course`，避免覆盖旧版配置、数据库和技能。在 macOS 下为 `~/Library/Application Support/HDU Station Course`。开发或测试可显式设置 `HDU_STATION_DATA_ROOT`。

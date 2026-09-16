@@ -8,6 +8,7 @@ export type Message = {
   createdAt: string;
 };
 export type Settings = {
+  appearance?: Appearance;
   baseURL: string;
   model: string;
   hasAPIKey: boolean;
@@ -28,6 +29,8 @@ export type Settings = {
     status: string;
   };
 };
+export type ColorTheme = "teal" | "violet" | "porcelain" | "harvest";
+export type Appearance = { instantText: boolean; theme?: ColorTheme };
 export type SettingsInput = {
   baseURL: string;
   apiKey: string;
@@ -81,6 +84,7 @@ export type TurnEvent = {
   assistant?: Message;
 };
 type Bindings = {
+  SaveAppearance(input: Appearance): Promise<Appearance>;
   ListConversations(): Promise<Conversation[]>;
   GetMessages(id: string): Promise<Message[]>;
   Chat(id: string, question: string, requestId: string): Promise<TurnResult>;
@@ -122,6 +126,7 @@ function bindings(): Bindings {
   return window.go.main.App;
 }
 export const api = {
+  appearance: (input: Appearance) => bindings().SaveAppearance(input),
   list: () => bindings().ListConversations(),
   messages: (id: string) => bindings().GetMessages(id),
   chat: (id: string, text: string, requestId: string) =>

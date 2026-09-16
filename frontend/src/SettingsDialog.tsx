@@ -5,6 +5,7 @@ import {
   type Settings,
   type LoginSource,
   type SourceConnection,
+  type Appearance,
 } from "./api";
 import { Icon } from "./Icon";
 import { SourceCard } from "./SourceCard";
@@ -23,10 +24,20 @@ export function SettingsDialog({
   settings,
   onClose,
   onSaved,
+  appearance,
+  onAppearanceChange,
+  appearanceBusy,
+  systemReduced,
+  appearanceError,
 }: {
   settings: Settings | null;
   onClose: () => void;
   onSaved: (settings: Settings) => void;
+  appearance?: Appearance;
+  onAppearanceChange?: (appearance: Appearance) => Promise<void>;
+  appearanceBusy?: boolean;
+  systemReduced?: boolean;
+  appearanceError?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [baseURL, setBaseURL] = useState(
@@ -122,7 +133,7 @@ export function SettingsDialog({
       <div className="dialog-inner">
         <div className="dialog-heading">
           <div>
-            <p className="eyebrow">保持连接</p>
+            <p className="eyebrow">TERMINAL CONFIGURATION / 终端配置</p>
             <h2 id="settings-title">助手设置</h2>
           </div>
           <button
@@ -134,6 +145,49 @@ export function SettingsDialog({
             <Icon name="close" />
           </button>
         </div>
+        {appearanceError && (
+          <p role="alert" className="inline-error">
+            {appearanceError}
+          </p>
+        )}
+        {appearance && onAppearanceChange && (
+          <details className="appearance-settings">
+            <summary>
+              <span>
+                <Icon name="terminal" size={17} />
+                显示与动效
+              </span>
+              <span>DISPLAY</span>
+            </summary>
+            <div className="appearance-option">
+              <div>
+                <strong>剧情式逐字对话</strong>
+                <p>
+                  {systemReduced
+                    ? "系统已减弱动效，回答会直接显示。"
+                    : "逐字解码情报；随时可以立即显示。"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="source-switch"
+                role="switch"
+                aria-label="剧情式逐字对话"
+                aria-checked={!appearance.instantText && !systemReduced}
+                disabled={appearanceBusy || systemReduced}
+                onClick={() =>
+                  onAppearanceChange({
+                    ...appearance,
+                    instantText: !appearance.instantText,
+                  })
+                }
+              >
+                <span />
+              </button>
+            </div>
+            <p className="field-help">修改后自动保存到本机。</p>
+          </details>
+        )}
         <form onSubmit={save}>
           <fieldset disabled={saving || !settings}>
             <div className="model-card">
@@ -142,7 +196,7 @@ export function SettingsDialog({
               </span>
               <div>
                 <strong>DeepSeek V4.1 Flash</strong>
-                <p>为每一次选课，提供一点思路。</p>
+                <p>情报分析核心 · 课程线索由此汇合</p>
               </div>
             </div>
             <label htmlFor="model-address">模型 API 地址</label>

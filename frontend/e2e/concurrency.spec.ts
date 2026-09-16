@@ -11,7 +11,10 @@ test("independent conversations keep streaming and stop only the visible one", a
     (window as any).runtime = {
       EventsOn: (_: string, handler: (event: any) => void) => {
         listeners.push(handler);
-        return () => {};
+        return () => {
+          const index = listeners.indexOf(handler);
+          if (index >= 0) listeners.splice(index, 1);
+        };
       },
     };
     (window as any).go = {
@@ -90,9 +93,13 @@ test("independent conversations keep streaming and stop only the visible one", a
   await page.getByRole("button", { name: /另有 1 个对话正在回答/ }).click();
   await expect(page.getByText("发现好课的独立进度")).toBeVisible();
   await expect(page.getByRole("button", { name: "停止回答" })).toBeEnabled();
+  if ((page.viewportSize()?.width || 0) < 600)
+    await page.getByRole("button", { name: "打开历史列表" }).click();
   await expect(
     page.getByRole("button", { name: "删除对话：发现好课" }),
   ).toBeDisabled();
+  if ((page.viewportSize()?.width || 0) < 600)
+    await page.getByRole("button", { name: "关闭历史列表" }).click();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,

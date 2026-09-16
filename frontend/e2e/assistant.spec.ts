@@ -285,8 +285,9 @@ test("welcome, real controls and readable response fit the window", async ({
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "先听听同学怎么说",
+    "情报台在线，等待你的指令。",
   );
+  await expect(page.locator(".greeting-glyph.is-revealed")).toHaveCount(13);
   await expect(
     page.getByRole("textbox", { name: "选课问题" }),
   ).toBeInViewport();

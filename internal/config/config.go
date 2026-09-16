@@ -21,10 +21,17 @@ type Model struct {
 	Name    string `yaml:"name"`
 }
 type Config struct {
-	Version   int     `yaml:"version"`
-	Model     Model   `yaml:"model"`
-	CampusKey string  `yaml:"campus_key,omitempty" json:"-"`
-	Sources   Sources `yaml:"sources,omitempty"`
+	Version    int        `yaml:"version"`
+	Model      Model      `yaml:"model"`
+	CampusKey  string     `yaml:"campus_key,omitempty" json:"-"`
+	Sources    Sources    `yaml:"sources,omitempty"`
+	Appearance Appearance `yaml:"appearance,omitempty"`
+}
+
+// Existing installs reveal dialogue gradually unless instant text is selected.
+type Appearance struct {
+	InstantText bool   `yaml:"instant_text" json:"instantText"`
+	Theme       string `yaml:"theme,omitempty" json:"theme,omitempty"`
 }
 
 type Sources struct {
@@ -88,7 +95,7 @@ func (s Sources) Validate() error {
 }
 
 func Default() Config {
-	return Config{Version: 1, Model: Model{BaseURL: "https://api.deepseek.com", Name: "deepseek-flash"}, Sources: Sources{Xiaohongshu: Xiaohongshu{BaseURL: DefaultXiaohongshuURL}}}
+	return Config{Version: 1, Model: Model{BaseURL: "https://api.deepseek.com", Name: "deepseek-flash"}, Sources: Sources{Xiaohongshu: Xiaohongshu{BaseURL: DefaultXiaohongshuURL}}, Appearance: Appearance{Theme: "harvest"}}
 }
 func Root() (string, error) {
 	if root := os.Getenv("HDU_STATION_DATA_ROOT"); root != "" {
@@ -103,6 +110,12 @@ func Root() (string, error) {
 func (c Config) Validate() error {
 	if c.Version != 1 {
 		return errors.New("配置版本不受支持，请使用对应版本的应用")
+	}
+	// An absent theme uses the default warm pastoral palette.
+	switch c.Appearance.Theme {
+	case "", "violet", "teal", "porcelain", "harvest":
+	default:
+		return errors.New("请选择青蓝琥珀、灰紫青绿、雾白青瓷或暖阳田园配色")
 	}
 	u, err := url.Parse(c.Model.BaseURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -139,6 +152,9 @@ func Load(root string) (Config, error) {
 	c.Version = 0 // Defaults for additive fields do not make a missing version valid.
 	if yaml.Unmarshal(data, &c) != nil {
 		return Config{}, errors.New("本机配置格式不正确")
+	}
+	if c.Appearance.Theme == "" {
+		c.Appearance.Theme = "harvest"
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err

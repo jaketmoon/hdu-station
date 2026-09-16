@@ -7,7 +7,13 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { api, type Message, type TurnEvent, type TurnResult } from "./api";
+import {
+  api,
+  type Appearance,
+  type Message,
+  type TurnEvent,
+  type TurnResult,
+} from "./api";
 
 vi.mock("./api", () => ({
   api: {
@@ -21,12 +27,14 @@ vi.mock("./api", () => ({
     install: vi.fn(),
     open: vi.fn(),
     copy: vi.fn(),
+    appearance: vi.fn(),
     subscribe: vi.fn(),
   },
   errorText: (error: unknown) => String(error),
 }));
 let event: (e: TurnEvent) => void;
 const settings = {
+  appearance: { instantText: true },
   baseURL: "https://api.deepseek.com",
   model: "deepseek-flash",
   hasAPIKey: true,
@@ -76,10 +84,76 @@ beforeEach(() => {
 });
 
 describe("course assistant", () => {
+  it("keeps the host startup theme while saved settings are loading", async () => {
+    document.documentElement.dataset.theme = "teal";
+    let resolveSettings!: (value: Awaited<ReturnType<typeof api.settings>>) => void;
+    const saved = await api.settings();
+    vi.mocked(api.settings).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSettings = resolve;
+    }));
+    render(<App />);
+    await waitFor(() => expect(resolveSettings).toBeDefined());
+    expect(document.documentElement).toHaveAttribute("data-theme", "teal");
+    await act(async () => resolveSettings({ ...saved, appearance: { instantText: false, theme: "teal" } }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "teal");
+  });
+
+  it("keeps the current palette on save failure and preserves a streaming answer and draft when retrying", async () => {
+    vi.mocked(api.chat).mockReturnValue(new Promise(() => {}));
+    vi.mocked(api.appearance).mockRejectedValueOnce(new Error("配色保存失败"));
+    render(<App />);
+    const themeButton = screen.getByRole("button", {
+      name: "切换为雾白青瓷配色",
+    });
+    await waitFor(() => expect(themeButton).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /想选点轻松的/ }));
+    await waitFor(() => expect(api.chat).toHaveBeenCalledTimes(1));
+    const requestId = vi.mocked(api.chat).mock.calls[0][2];
+    act(() =>
+      event({
+        requestId,
+        conversationId: "c1",
+        kind: "delta",
+        text: "正在核对课程",
+      }),
+    );
+    const input = screen.getByRole("textbox", { name: "选课问题" });
+    fireEvent.change(input, { target: { value: "下一条问题" } });
+    fireEvent.click(themeButton);
+    await screen.findByText(/配色保存失败/);
+    expect(document.documentElement).toHaveAttribute("data-theme", "harvest");
+    expect(input).toHaveValue("下一条问题");
+    const answer = screen.getByText("正在核对课程");
+    expect(answer).toBeVisible();
+
+    let finish!: (value: Appearance) => void;
+    vi.mocked(api.appearance).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fireEvent.click(themeButton);
+    expect(themeButton).toBeDisabled();
+    expect(document.documentElement).toHaveAttribute("data-theme", "harvest");
+    expect(api.appearance).toHaveBeenLastCalledWith({
+      instantText: true,
+      theme: "porcelain",
+    });
+    await act(async () => finish({ instantText: true, theme: "porcelain" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "porcelain");
+    expect(input).toHaveValue("下一条问题");
+    expect(screen.getByText("正在核对课程")).toBe(answer);
+    expect(screen.queryByText(/配色保存失败/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "停止回答" })).toBeEnabled();
+    expect(api.chat).toHaveBeenCalledTimes(1);
+    expect(api.cancel).not.toHaveBeenCalled();
+  });
+
   it("opens directly into the assistant with three usable prompts", async () => {
     render(<App />);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "先听听同学怎么说",
+      "情报台在线，等待你的指令。",
     );
     expect(screen.getByRole("textbox", { name: "选课问题" })).toBeVisible();
     expect(screen.getByRole("button", { name: "发送问题" })).toBeDisabled();
@@ -224,6 +298,86 @@ describe("course assistant", () => {
     );
     expect(api.chat).not.toHaveBeenCalled();
   });
+
+  it("retains the current transcript during slow navigation and ignores stale loads", async () => {
+    vi.mocked(api.list).mockResolvedValue([
+      { id: "a", title: "通讯甲", updatedAt: "" },
+      { id: "b", title: "通讯乙", updatedAt: "" },
+      { id: "c", title: "通讯丙", updatedAt: "" },
+    ]);
+    const pending = new Map<string, (items: Message[]) => void>();
+    vi.mocked(api.messages).mockImplementation(
+      (id) => new Promise((resolve) => pending.set(id, resolve)),
+    );
+    const { container } = render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "通讯甲" }));
+    await act(async () =>
+      pending.get("a")!([message("a", "assistant", "甲的情报")]),
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "选课问题" }), {
+      target: { value: "保留我的草稿" },
+    });
+    let welcomeFlashed = false;
+    const observer = new MutationObserver(() => {
+      if (container.querySelector(".welcome")) welcomeFlashed = true;
+    });
+    observer.observe(container, { childList: true, subtree: true });
+    fireEvent.click(screen.getByRole("button", { name: "通讯乙" }));
+    expect(screen.getByText("甲的情报")).toBeVisible();
+    expect(screen.getByRole("button", { name: "发送问题" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "选课问题" }), {
+      key: "Enter",
+    });
+    expect(api.chat).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "通讯丙" }));
+    await act(async () =>
+      pending.get("c")!([message("c", "assistant", "丙的情报")]),
+    );
+    await act(async () =>
+      pending.get("b")!([message("b", "assistant", "乙的过期情报")]),
+    );
+    expect(screen.getByText("丙的情报")).toBeVisible();
+    expect(screen.queryByText("乙的过期情报")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "选课问题" })).toHaveValue(
+      "保留我的草稿",
+    );
+    expect(screen.getByRole("button", { name: "发送问题" })).toBeEnabled();
+    expect(welcomeFlashed).toBe(false);
+    observer.disconnect();
+  });
+
+  it("keeps the selected transcript on a load error and cancels loading when opening a new chat", async () => {
+    vi.mocked(api.list).mockResolvedValue([
+      { id: "a", title: "通讯甲", updatedAt: "" },
+      { id: "b", title: "通讯乙", updatedAt: "" },
+    ]);
+    vi.mocked(api.messages).mockResolvedValueOnce([
+      message("a", "assistant", "甲的情报"),
+    ]);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "通讯甲" }));
+    await screen.findByText("甲的情报");
+    vi.mocked(api.messages).mockRejectedValueOnce(new Error("通讯读取失败"));
+    fireEvent.click(screen.getByRole("button", { name: "通讯乙" }));
+    await screen.findByRole("alert");
+    expect(screen.getByText("甲的情报")).toBeVisible();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    let resolve!: (items: Message[]) => void;
+    vi.mocked(api.messages).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "通讯乙" }));
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+    await act(async () => resolve([message("b", "assistant", "过期的乙")]));
+    expect(
+      screen.getByRole("heading", { name: "情报台在线，等待你的指令。" }),
+    ).toBeVisible();
+    expect(screen.queryByText("过期的乙")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });
 
 function controlledChats() {
@@ -284,6 +438,41 @@ function controlledChats() {
 }
 
 describe("parallel conversations", () => {
+  it("completes a pending switch even when the outgoing answer finishes during loading", async () => {
+    const chats = controlledChats();
+    vi.mocked(api.list).mockResolvedValue([
+      { id: "saved", title: "存档通讯", updatedAt: "" },
+    ]);
+    let load!: (items: Message[]) => void;
+    vi.mocked(api.messages).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          load = resolve;
+        }),
+    );
+    render(<App />);
+    await screen.findByRole("button", { name: "存档通讯" });
+    chats.send("当前的问题");
+    const first = chats.start(0);
+    chats.delta(0, "当前的情报");
+    fireEvent.click(screen.getByRole("button", { name: "存档通讯" }));
+    await act(async () =>
+      chats.pending[0].resolve({
+        conversation: first.conversation,
+        message: {
+          ...first.assistant,
+          state: "complete",
+          content: "当前的最终情报",
+        },
+      }),
+    );
+    await act(async () =>
+      load([message("saved", "assistant", "存档中的情报")]),
+    );
+    expect(screen.getByText("存档中的情报")).toBeVisible();
+    expect(screen.queryByText("当前的最终情报")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
   it("streams independently, stops only the selected request, and keeps other requests after completion", async () => {
     const chats = controlledChats();
     render(<App />);
@@ -305,6 +494,7 @@ describe("parallel conversations", () => {
     fireEvent.click(screen.getByRole("button", { name: "停止回答" }));
     expect(api.cancel).toHaveBeenCalledWith(chats.pending[1].requestId);
     fireEvent.click(screen.getByRole("button", { name: "问题 0" }));
+    await screen.findByText("第一条已有结果不能串到第二条");
     expect(screen.getByRole("button", { name: "停止回答" })).toBeEnabled();
     expect(screen.getByText("第一条已有结果不能串到第二条")).toBeVisible();
     chats.delta(0, "", "reset");

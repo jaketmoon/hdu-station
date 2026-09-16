@@ -2,6 +2,7 @@
 set -eu
 mkdir -p build/bin/licenses
 cp docs/third-party/ZanaoMCP-LICENSE build/bin/licenses/
+cp docs/third-party/PressStart2P-OFL.txt docs/third-party/ShareTechMono-OFL.txt docs/third-party/ArkPixel-OFL.txt build/bin/licenses/
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "Executable: build/bin/hdu-station"
   exit 0
@@ -10,6 +11,7 @@ bundle="build/bin/HDU Station.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 mkdir -p "$bundle/Contents/Resources/licenses"
 cp build/bin/licenses/ZanaoMCP-LICENSE "$bundle/Contents/Resources/licenses/"
+cp build/bin/licenses/PressStart2P-OFL.txt build/bin/licenses/ShareTechMono-OFL.txt build/bin/licenses/ArkPixel-OFL.txt "$bundle/Contents/Resources/licenses/"
 cp build/bin/hdu-station "$bundle/Contents/MacOS/hdu-station"
 cat > "$bundle/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
