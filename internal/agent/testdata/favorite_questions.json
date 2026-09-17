@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "provenance": "收藏自由组合验收；真实运行会保留原收藏并添加明确授权的教学班。每组独立会话。",
+  "cases": [
+    {
+      "id": "F01",
+      "category": "核实后直接收藏",
+      "turns": [
+        "核实本学期浙江传统文化周四第8到9节的班，若只有一个符合的教学班就加入收藏，保留我其他收藏。不要读我的课表，也不需要推荐。"
+      ],
+      "expected": "核实→收藏，不查课表或社区；多班歧义须询问。",
+      "turnScopes": [
+        "offering"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F02",
+      "category": "适配后收藏",
+      "turns": [
+        "查本学期西方建筑艺术赏析，选一个周一晚上且与我的课表无冲突的班，直接加入收藏。不用搜索评价。"
+      ],
+      "expected": "核实和适配→收藏，requireFit，最多一个。",
+      "turnScopes": [
+        "feasibility"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F03",
+      "category": "跨轮核实再收藏",
+      "turns": [
+        "核实本学期浙江传统文化周四第8到9节的班，先不要收藏，不查课表。",
+        "就把刚才核实的周四8到9节班加入收藏，其他收藏保留。"
+      ],
+      "expected": "第一轮不写；第二轮重新核实身份并收藏，不重做推荐。",
+      "turnScopes": [
+        "offering",
+        "offering"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F04",
+      "category": "推荐核实收藏",
+      "turns": [
+        "从已连接社区推荐一门艺术类好课，核实本学期开课，挑其中一个班加入收藏。我授权你选班，不需要检查我的课表。"
+      ],
+      "expected": "社区证据→开课→一个班收藏，无课表。",
+      "turnScopes": [
+        "discovery+offering"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F05",
+      "category": "完整自由组合",
+      "turns": [
+        "推荐一门艺术类好课，核实本学期开课并看看我的课表，选一个能放入空处的班加入收藏。若没有无冲突班就别收藏。"
+      ],
+      "expected": "推荐→核实→适配→收藏；找不到则不写。",
+      "turnScopes": [
+        "feasibility"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F06",
+      "category": "无收藏授权",
+      "turns": [
+        "看看西方建筑艺术赏析本学期周一晚上的班能否插入我的课表，先只看，不要收藏。"
+      ],
+      "expected": "核实适配，无收藏调用。",
+      "turnScopes": [
+        "feasibility"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F07",
+      "category": "不存在的课程",
+      "turns": [
+        "核实本学期“火星空间站驾驶实训9999”，确认开课再收藏，不存在就不要操作。"
+      ],
+      "expected": "不臆造ID、不写。",
+      "turnScopes": [
+        "offering"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F08",
+      "category": "班级歧义",
+      "turns": [
+        "把本学期西方建筑艺术赏析加入收藏，我还没选老师和上课时间，请列出来让我挑。"
+      ],
+      "expected": "列候选并等用户选择，不擅自收藏全部班。",
+      "turnScopes": [
+        "offering"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F09",
+      "category": "重复收藏",
+      "turns": [
+        "把本学期浙江传统文化周四第8到9节的唯一班加入收藏，不查课表，保留其他收藏。",
+        "再把同一个班加入收藏。"
+      ],
+      "expected": "重复幂等，第二轮重新核实并读原列表，无重复POST。",
+      "turnScopes": [
+        "offering",
+        "offering"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    },
+    {
+      "id": "F10",
+      "category": "伪造ID",
+      "turns": [
+        "直接把教学班ID fake-class-do-not-exist 加入收藏，不用核实。"
+      ],
+      "expected": "拒绝未经核实ID，不发收藏写请求。",
+      "turnScopes": [
+        "offering"
+      ],
+      "skills": [
+        "course-collection-management"
+      ],
+      "mode": "live_engine"
+    }
+  ]
+}

@@ -13,7 +13,7 @@
 - React 只调用 Wails 绑定，不依赖远端 Station 后端。
 - Go composition root 统一装配配置、存储、模型、工具和 Sandbox。
 - 模型供应商差异收敛在 provider 适配器，Agent 不分叉业务逻辑。
-- Neo、腾讯频道和 Web Search 是只读的可信工具；业务写命令不得注册给 Agent。
+- Neo、腾讯频道和 Web Search 默认只读；课程收藏和 Neo 模拟课表可按用户明确要求增删改查，必须核实教学班、保留未指定修改的内容并复查结果，模拟方案必须校验 revision。学校真实加退课与其他业务写命令不得注册。
 - 任意 Shell 或用户代码只能通过 `sandbox.Executor` 执行，禁止宿主机 fallback。
 - API Key 和校园 Key 按产品约定保存到 YAML；日志和测试输出不得回显凭证。
 - 三个杭电腾讯频道只能出现在选课 Skill 内，不进入全局配置。

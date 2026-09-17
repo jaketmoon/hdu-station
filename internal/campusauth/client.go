@@ -1,6 +1,6 @@
 // Package campusauth uses the official hduhelp-cli Device Authorization Grant.
 // Contract: hduhelp/hduhelp-neo@ba988e2, cmd/hduhelp-cli/auth.go and
-// docs/hduhelp-cli.md. Only course and personal schedule reads are requested.
+// docs/hduhelp-cli.md. Requests course/schedule reads and simulation plan and course favorite access.
 package campusauth
 
 import (
@@ -18,14 +18,18 @@ import (
 
 const CourseScope = "academic:course:read"
 const ScheduleScope = "academic:schedule:read"
-const requestedScope = CourseScope + " " + ScheduleScope
+const SimulationReadScope = "academic:coursesimulation:read"
+const SimulationWriteScope = "academic:coursesimulation:write"
+const FavoriteReadScope = "academic:coursefavorite:read"
+const FavoriteWriteScope = "academic:coursefavorite:write"
+const requestedScope = CourseScope + " " + ScheduleScope + " " + SimulationReadScope + " " + SimulationWriteScope + " " + FavoriteReadScope + " " + FavoriteWriteScope
 
 var (
 	ErrLoginRequired = errors.New("校园授权无效或已过期，请在助手设置中重新授权")
 	ErrUnavailable   = errors.New("校园授权服务暂时无法连接，请稍后重试")
 	ErrStorage       = errors.New("无法保存校园授权，请检查应用数据目录后重试")
 	ErrResponse      = errors.New("校园授权服务返回无效响应，请重新授权")
-	ErrScope         = errors.New("缺少所需校园读取权限，请在助手设置的 HDU CLI 登录中重新授权课程信息和本人课表")
+	ErrScope         = errors.New("缺少所需校园权限，请在助手设置的 HDU CLI 登录中重新授权")
 )
 
 type credentials struct {

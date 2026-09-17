@@ -63,7 +63,14 @@ func TestLiveStudentQuestionDataset(t *testing.T) {
 	if err != nil {
 		t.Fatal("campus connection unavailable")
 	}
-	data, err := os.ReadFile("testdata/student_questions.json")
+	datasetPath := "testdata/student_questions.json"
+	if os.Getenv("HDU_STATION_QA_DATASET") == "favorites" {
+		datasetPath = "testdata/favorite_questions.json"
+	}
+	if os.Getenv("HDU_STATION_QA_DATASET") == "management" {
+		datasetPath = "testdata/management_questions.json"
+	}
+	data, err := os.ReadFile(datasetPath)
 	if err != nil {
 		t.Fatal(err)
 	}

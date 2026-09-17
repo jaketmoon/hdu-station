@@ -81,7 +81,9 @@ it("opens official web authorization and shows the saved local login without a P
   expect(screen.queryByLabelText(/校园 PAT/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "网页授权" }));
   expect(await screen.findByText("ABCD-EFGH")).toBeVisible();
-  expect(screen.getByText(/仅申请课程信息与本人课表读取权限/)).toBeVisible();
+  expect(
+    screen.getByText(/申请课程与课表读取、模拟方案与课程收藏读写权限/),
+  ).toBeVisible();
   expect(screen.getByRole("button", { name: "网页授权" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "再次打开授权页" }));
   await waitFor(() =>
@@ -251,4 +253,79 @@ it("makes unsupported browser authorization unavailable", () => {
   );
   fireEvent.click(screen.getByText("HDU CLI 登录"));
   expect(screen.getByRole("button", { name: "网页授权" })).toBeDisabled();
+});
+
+it("keeps old campus reads usable while showing missing simulation grants", () => {
+  const oldSettings = {
+    ...settings,
+    campus: {
+      hasCredential: true,
+      status: "saved",
+      scheduleAccess: true,
+      simulationReadAccess: true,
+      simulationWriteAccess: false,
+    },
+  };
+  const { rerender } = render(
+    <SettingsDialog
+      settings={oldSettings}
+      onClose={vi.fn()}
+      onSaved={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByText("HDU CLI 登录"));
+  expect(screen.getByText(/当前登录尚未记录完整的模拟选课权限/)).toBeVisible();
+  expect(
+    screen.queryByText(/当前登录尚未记录课表读取权限/),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "重新授权" })).toBeEnabled();
+  rerender(
+    <SettingsDialog
+      settings={{
+        ...oldSettings,
+        campus: { ...oldSettings.campus, simulationWriteAccess: true },
+      }}
+      onClose={vi.fn()}
+      onSaved={vi.fn()}
+    />,
+  );
+  expect(
+    screen.queryByText(/当前登录尚未记录完整的模拟选课权限/),
+  ).not.toBeInTheDocument();
+});
+
+it("shows a favorite permission upgrade until both grants are recorded", () => {
+  const existing = {
+    ...settings,
+    campus: {
+      hasCredential: true,
+      status: "saved",
+      scheduleAccess: true,
+      simulationReadAccess: true,
+      simulationWriteAccess: true,
+      favoriteReadAccess: true,
+      favoriteWriteAccess: false,
+    },
+  };
+  const { rerender } = render(
+    <SettingsDialog settings={existing} onClose={vi.fn()} onSaved={vi.fn()} />,
+  );
+  fireEvent.click(screen.getByText("HDU CLI 登录"));
+  expect(screen.getByText(/当前登录尚未记录完整的课程收藏权限/)).toBeVisible();
+  expect(
+    screen.queryByText(/当前登录尚未记录完整的模拟选课权限/),
+  ).not.toBeInTheDocument();
+  rerender(
+    <SettingsDialog
+      settings={{
+        ...existing,
+        campus: { ...existing.campus, favoriteWriteAccess: true },
+      }}
+      onClose={vi.fn()}
+      onSaved={vi.fn()}
+    />,
+  );
+  expect(
+    screen.queryByText(/当前登录尚未记录完整的课程收藏权限/),
+  ).not.toBeInTheDocument();
 });

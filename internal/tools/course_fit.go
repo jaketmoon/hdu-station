@@ -6,10 +6,12 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type FitCoursesInput struct {
+	ScheduleSource    string          `json:"scheduleSource,omitempty" jsonschema:"enum=simulation,enum=actual,description=补空和冲突筛选默认simulation，依据模拟课表effectiveCourses；仅用户明确要求查看真实课表时actual"`
 	ReplaceCandidates bool            `json:"replaceCandidates,omitempty" jsonschema:"description=仅当用户明确只保留本次courses时传true；空courses且true清除旧候选，只显示课表"`
 	TimeOfDay         []string        `json:"timeOfDay,omitempty" jsonschema:"description=用户允许的时段：morning上午1–5节、afternoon下午6–9节、evening晚上10–13节；多项取并集，与allowedSections同传取交集"`
 	CoreKeywords      []CourseKeyword `json:"coreKeywords,omitempty" jsonschema:"description=模糊课程名的核心词，规则同 check_course_offerings"`
@@ -27,18 +29,20 @@ type CourseFit struct {
 	Reason    string       `json:"reason"`
 }
 type FitCoursesResult struct {
-	Term             AcademicTerm    `json:"term"`
-	TermSource       string          `json:"termSource"`
-	CheckedAt        string          `json:"checkedAt"`
-	ScheduleComplete bool            `json:"scheduleComplete"`
-	ScheduleEmpty    bool            `json:"scheduleEmpty"`
-	BusyTimes        []CourseTime    `json:"busyTimes"`
-	Offerings        *OfferingResult `json:"offerings,omitempty"`
-	Fits             []CourseFit     `json:"fits"`
-	CandidateFits    []CourseFit     `json:"candidateFits,omitempty"`
-	PlanIncomplete   bool            `json:"planIncomplete,omitempty"`
-	SuggestedPlan    []string        `json:"suggestedPlan,omitempty"`
-	Warnings         []string        `json:"warnings,omitempty"`
+	ScheduleSource     string          `json:"scheduleSource"`
+	SimulationRevision int64           `json:"simulationRevision,omitempty"`
+	Term               AcademicTerm    `json:"term"`
+	TermSource         string          `json:"termSource"`
+	CheckedAt          string          `json:"checkedAt"`
+	ScheduleComplete   bool            `json:"scheduleComplete"`
+	ScheduleEmpty      bool            `json:"scheduleEmpty"`
+	BusyTimes          []CourseTime    `json:"busyTimes"`
+	Offerings          *OfferingResult `json:"offerings,omitempty"`
+	Fits               []CourseFit     `json:"fits"`
+	CandidateFits      []CourseFit     `json:"candidateFits,omitempty"`
+	PlanIncomplete     bool            `json:"planIncomplete,omitempty"`
+	SuggestedPlan      []string        `json:"suggestedPlan,omitempty"`
+	Warnings           []string        `json:"warnings,omitempty"`
 }
 type scheduleResult struct {
 	times            []CourseTime
@@ -176,8 +180,13 @@ func containsAll(allowed, values []int) bool {
 	}
 	return len(overlap(values, allowed)) == len(values)
 }
-func fitCourse(o Offering, schedule scheduleResult, in FitCoursesInput) CourseFit {
-	fit := CourseFit{Offering: o, Status: "unknown", Reason: "上课时间或本人课表未完整核实。"}
+func fitCourse(o Offering, schedule scheduleResult, in FitCoursesInput) (fit CourseFit) {
+	defer func() {
+		if in.ScheduleSource == "simulation" {
+			fit.Reason = strings.NewReplacer("本人课表", "模拟课表", "本人已选课程", "模拟课表中的有效课程").Replace(fit.Reason)
+		}
+	}()
+	fit = CourseFit{Offering: o, Status: "unknown", Reason: "上课时间或本人课表未完整核实。"}
 	if schedule.classes[o.ClassID] || schedule.courses[o.CourseID] {
 		fit.Status = "already_enrolled"
 		fit.Reason = "本人课表中已有该教学班或同课程号课程。"
@@ -253,6 +262,9 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 	}
 	// Defaults are resolved before inheriting preferences: omitted term fields
 	// for new courses may select a different semester from the previous call.
+	if in.ScheduleSource == "" {
+		in.ScheduleSource = s.fitPreferences.ScheduleSource
+	}
 	s.resetPreferencesForTerm(result.Term)
 	s.scheduleRequested = true
 	if in.AllowedDays == nil {
@@ -261,8 +273,24 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 	if in.AllowedSections == nil {
 		in.AllowedSections = s.fitPreferences.AllowedSections
 	}
+	if in.ScheduleSource == "" {
+		in.ScheduleSource = s.fitPreferences.ScheduleSource
+	}
+	if in.ScheduleSource == "" {
+		in.ScheduleSource = "simulation"
+	}
+	if in.ScheduleSource != "simulation" && in.ScheduleSource != "actual" {
+		return result, errors.New("课表来源须为 simulation 或 actual")
+	}
+	result.ScheduleSource = in.ScheduleSource
 	s.fitPreferences = in
-	schedule := s.schedule(ctx, result.Term)
+	var schedule scheduleResult
+	if in.ScheduleSource == "simulation" {
+		schedule, result.SimulationRevision = s.simulationSchedule(ctx, result.Term)
+		result.Warnings[0] = "按 Neo 模拟课表的有效课程核对整学期周次、星期和节次；模拟加入占用时间，模拟移除释放时间。fits仅代表与该模拟课表兼容，suggestedPlan内的候选彼此也无冲突。未校验资格、余量、考试或通勤；未自动保存方案或执行选课。"
+	} else {
+		schedule = s.schedule(ctx, result.Term)
+	}
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return result, ctx.Err()
 	}
@@ -276,7 +304,7 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 		result.Warnings = append(result.Warnings, schedule.warning)
 	}
 	if result.ScheduleEmpty {
-		result.Warnings = append(result.Warnings, "教务返回该学期空课表，请确认学期及尚未同步的选课；空闲判断仅基于此次返回。")
+		result.Warnings = append(result.Warnings, "所选课表来源返回该学期空课表，空闲判断仅基于此次返回。")
 	}
 	if len(names) == 0 && !reuse {
 		return result, nil

@@ -111,7 +111,7 @@ func TestCandidateStateExplicitReplacementAndSemesterIsolation(t *testing.T) {
 	if len(r.Queries) != 1 || s.scheduleRequested || s.lastFit != nil || len(s.fitPreferences.AllowedDays) > 0 {
 		t.Fatal("different semester retained queries or fit preferences")
 	}
-	fit, _ := s.FitCourses(ctx, FitCoursesInput{})
+	fit, _ := s.FitCourses(ctx, FitCoursesInput{ScheduleSource: "actual"})
 	if fit.Term != r.Term || len(fit.Fits) != 1 || fit.Fits[0].Status != "fits" {
 		t.Fatalf("semester reuse %v %+v", fit.Term, fit.Fits)
 	}

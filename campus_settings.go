@@ -10,14 +10,25 @@ import (
 )
 
 type CampusConnection struct {
-	HasCredential  bool   `json:"hasCredential"`
-	Status         string `json:"status"`
-	Message        string `json:"message,omitempty"`
-	ScheduleAccess bool   `json:"scheduleAccess"`
+	FavoriteReadAccess    bool   `json:"favoriteReadAccess"`
+	FavoriteWriteAccess   bool   `json:"favoriteWriteAccess"`
+	HasCredential         bool   `json:"hasCredential"`
+	Status                string `json:"status"`
+	Message               string `json:"message,omitempty"`
+	ScheduleAccess        bool   `json:"scheduleAccess"`
+	SimulationReadAccess  bool   `json:"simulationReadAccess"`
+	SimulationWriteAccess bool   `json:"simulationWriteAccess"`
 }
 
 func (a *App) campusConnection() CampusConnection {
-	connection := CampusConnection{HasCredential: a.campus.Configured(), ScheduleAccess: a.campus.HasScope(campusauth.ScheduleScope)}
+	connection := CampusConnection{
+		HasCredential:         a.campus.Configured(),
+		ScheduleAccess:        a.campus.HasScope(campusauth.ScheduleScope),
+		SimulationReadAccess:  a.campus.HasScope(campusauth.SimulationReadScope),
+		SimulationWriteAccess: a.campus.HasScope(campusauth.SimulationWriteScope),
+		FavoriteReadAccess:    a.campus.HasScope(campusauth.FavoriteReadScope),
+		FavoriteWriteAccess:   a.campus.HasScope(campusauth.FavoriteWriteScope),
+	}
 	if !campusauth.Supported(runtime.GOOS) {
 		connection.Status = "unsupported"
 		return connection

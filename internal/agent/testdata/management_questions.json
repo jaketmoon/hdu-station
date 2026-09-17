@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "provenance": "管理Skill真实模型只读验收；写操作矩阵在course_management_test.go用隔离HTTP fixture运行，不动用户数据。",
+  "cases": [
+    {
+      "id": "M01",
+      "category": "收藏独立查询",
+      "turns": [
+        "查看我的课程收藏，列出课程和老师，不做任何修改，也不用读课表。"
+      ],
+      "expected": "只读取收藏和课程详情，不读模拟方案或写收藏。",
+      "turnScopes": [
+        "management-read"
+      ],
+      "skills": [
+        "course-collection-management",
+        "course-simulation-management"
+      ],
+      "mode": "live_engine_read_only"
+    },
+    {
+      "id": "M02",
+      "category": "模拟课表独立查询",
+      "turns": [
+        "查看本学期我的模拟课表，区分真实已选和模拟加入、模拟移除；只查看，不做任何修改。"
+      ],
+      "expected": "读取模拟课表，展示正确状态，无写入。",
+      "turnScopes": [
+        "management-read"
+      ],
+      "skills": [
+        "course-collection-management",
+        "course-simulation-management"
+      ],
+      "mode": "live_engine_read_only"
+    },
+    {
+      "id": "M03",
+      "category": "自由组合读取",
+      "turns": [
+        "先看我的收藏，再看本学期模拟课表。把两部分分别列出，不做任何添加、删除或修改。"
+      ],
+      "expected": "收藏与模拟课表都读取，分别展示，零写入。",
+      "turnScopes": [
+        "management-read"
+      ],
+      "skills": [
+        "course-collection-management",
+        "course-simulation-management"
+      ],
+      "mode": "live_engine_read_only"
+    },
+    {
+      "id": "M04",
+      "category": "排行榜",
+      "turns": [
+        "查课程收藏排行，看看有哪些课。只查排行，不要添加收藏或模拟课程。"
+      ],
+      "expected": "只读排行，不能当作本人收藏。",
+      "turnScopes": [
+        "management-read"
+      ],
+      "skills": [
+        "course-collection-management",
+        "course-simulation-management"
+      ],
+      "mode": "live_engine_read_only"
+    },
+    {
+      "id": "M05",
+      "category": "模拟课表补空",
+      "turns": [
+        "核实西方建筑艺术赏析本学期哪些班能补进我的模拟课表空档，按已有模拟加入和模拟移除后的课表判断；先只给方案，不要保存，也不用查评价。"
+      ],
+      "expected": "fit_courses_to_schedule以simulation为来源，显示模拟课表版本，不读取真实schedule接口，不写方案。",
+      "turnScopes": [
+        "management-read"
+      ],
+      "skills": [
+        "timetable-fit",
+        "course-feasibility"
+      ],
+      "mode": "live_engine_read_only"
+    }
+  ]
+}

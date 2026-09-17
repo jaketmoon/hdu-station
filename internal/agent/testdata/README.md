@@ -443,3 +443,21 @@
 1. 我周二下午三点以后才有空，影视音乐赏析哪个班来得及？
 
 预期：只有取得官方节次钟点依据时才能转换；否则说明需核对钟点，不能随意将15:00映射为某节次。
+
+## 收藏组合题集
+
+`favorite_questions.json` 独立维护10组、12轮：直接核实后收藏、课表适配后收藏、跨轮追问、推荐后收藏、推荐并插空后收藏、明确不收藏、查无课程、班级歧义、重复添加和伪造ID。没有固定工作流。
+
+真实运行会添加题目明确要求的课程收藏并保留原列表，不执行选课或删除收藏：
+
+```sh
+HDU_STATION_LIVE_QA=1 HDU_STATION_QA_DATASET=favorites HDU_STATION_QA_WORKERS=2 HDU_STATION_QA_RUN=favorites-qa-$(date +%Y%m%d-%H%M%S) go test ./internal/agent -run '^TestLiveStudentQuestionDataset$' -v -count=1 -timeout=30m
+```
+
+问题集运行完成不等于语义验收通过；检查各轮 actions、最终收藏回执以及不该调用的课表/社区能力。网络响应丢失、权限缺失、原收藏保留与未知班级拒绝等由 `internal/tools/course_favorites_test.go` 的故障测试覆盖。
+
+## 收藏与模拟课表管理
+
+`course-favorites` 已移除，由 `course-collection-management` 与 `course-simulation-management` 替代。原收藏添加题集继续作为回归题；新增 `management_questions.json` 4组真实模型只读题（收藏查询、模拟课表查询、两者自由组合、排行）。使用 `HDU_STATION_QA_DATASET=management` 选择。
+
+增删改查与重置的写操作在 `internal/tools/course_management_test.go` 使用隔离 HTTP fixture 验证：保留其他条目、换班、撤销模拟退课、整体替换/清空、版本冲突、未知ID、跨学期、未知时间、冲突、丢失响应与禁止自动重试。默认不通过用户账号执行破坏性题目。

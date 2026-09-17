@@ -64,7 +64,15 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	if err != nil {
 		return Result{}, err
 	}
-	fit, err := utils.InferTool("fit_courses_to_schedule", "读取本人完整课表，按全部周次、星期与节次判断候选班级能否放入空闲位置。提供课程名可直接检查开课和冲突；省略课程名只读取课表占用时段；问某天或时段的忙闲也应传 allowedDays、timeOfDay 或 allowedSections。遵守工具计算的 fits/conflict/unknown 等状态，suggestedPlan 才是彼此也无冲突的候选组合。", recordAction(&actions, "fit_courses_to_schedule", campus.FitCourses))
+	fit, err := utils.InferTool("fit_courses_to_schedule", "默认读取Neo模拟课表effectiveCourses，按全部周次、星期与节次补空；模拟加入占位、模拟移除释放时间。scheduleSource=simulation，只有明确查询学校真实课表时actual。提供课程名可直接检查开课和冲突；省略课程名只读取课表占用时段；问某天或时段的忙闲也应传 allowedDays、timeOfDay 或 allowedSections。遵守工具计算的 fits/conflict/unknown 等状态，suggestedPlan 才是彼此也无冲突的候选组合；模拟数据失败不得回退真实课表。", recordAction(&actions, "fit_courses_to_schedule", campus.FitCourses))
+	if err != nil {
+		return Result{}, err
+	}
+	favorites, err := utils.InferTool("manage_course_collection", "管理课程收藏：read查看含课程详情的列表、rank排行、add添加、remove删除、update换班、replace整体替换、clear清空。写入必须按用户明确要求，新班级先核实，删除或替换前先read；保留未指定内容并复查，不修改真实选课。", recordAction(&actions, "manage_course_collection", campus.ManageFavorites))
+	if err != nil {
+		return Result{}, err
+	}
+	simulation, err := utils.InferTool("manage_course_simulation", "管理Neo模拟课表：read查询；update局部增删改（ENROLL模拟加入，DROP模拟退真实课，removeClassIDs撤销模拟操作）；replace完整替换；reset恢复真实课表。写前read取revision，新班先核实，保留未指定内容；不执行学校真实加退课。", recordAction(&actions, "manage_course_simulation", campus.ManageSimulation))
 	if err != nil {
 		return Result{}, err
 	}
@@ -92,7 +100,7 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	provider := NewProvider(e.Model, func(event Event) {
 		// Official campus facts are rendered from the tool records, so a model
 		// cannot briefly stream a mismatched class/time table before replacement.
-		if campus.HasQueryResult() && event.Kind == "delta" {
+		if (campus.HasQueryResult() || campus.ManagementDisplay() != "") && event.Kind == "delta" {
 			return
 		}
 		citations.consume(event)
@@ -100,7 +108,7 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	provider.completed = func() string { return campusDisplay }
 	provider.completionGap = campus.CompletionGap
 	provider.canUseTools = func() bool { return session.Calls+campus.Calls < 12 }
-	runner, err := react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: provider, MaxStep: 26, ToolsConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{search, read, academicTerm, offerings, fit, show}, ExecuteSequentially: true}})
+	runner, err := react.NewAgent(ctx, &react.AgentConfig{ToolCallingModel: provider, MaxStep: 26, ToolsConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{search, read, academicTerm, offerings, fit, favorites, simulation, show}, ExecuteSequentially: true}})
 	if err != nil {
 		return Result{}, errors.New("无法启动选课助手")
 	}
@@ -128,6 +136,10 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 	message, err := runner.Generate(ctx, input)
 	result := Result{Actions: actions, Model: provider.state.actualModel, Searches: session.Searches, Reads: session.Reads, CampusCalls: campus.Calls, Sources: session.Sources(), Connections: session.ConnectionStates()}
 	if err != nil {
+		if receipt := campus.ManagementDisplay(); receipt != "" {
+			result.Text = receipt + "\n\n后续回答未完成；以上为已经取得的操作结果。"
+			citations.publish(result.Text)
+		}
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
@@ -138,6 +150,13 @@ func (e *Engine) Answer(ctx context.Context, history []storage.Message, emit fun
 		text = campusDisplay
 	} else if campus.HasQueryResult() {
 		text = campus.Display()
+	}
+	if receipt := campus.ManagementDisplay(); receipt != "" {
+		if campus.HasQueryResult() {
+			text += "\n\n" + receipt
+		} else {
+			text = receipt
+		}
 	}
 	result.Text = withSourceLinks(resolveCitations(text, citations.sources()), result.Sources)
 	citations.publish(result.Text)

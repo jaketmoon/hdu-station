@@ -50,6 +50,10 @@ export type SettingsInput = {
 export type LoginSource = "qq" | "xiaohongshu";
 export type CampusConnection = {
   scheduleAccess?: boolean;
+  favoriteReadAccess?: boolean;
+  favoriteWriteAccess?: boolean;
+  simulationReadAccess?: boolean;
+  simulationWriteAccess?: boolean;
   hasCredential: boolean;
   status: string;
   message?: string;

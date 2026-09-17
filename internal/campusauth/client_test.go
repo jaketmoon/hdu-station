@@ -21,7 +21,7 @@ func response(status int, body string) *http.Response {
 }
 
 const deviceJSON = `{"device_code":"device-private-sentinel","user_code":"ABCD-EFGH","verification_uri_complete":"https://neo.hduhelp.com/account/tokens/authorize?user_code=ABCD-EFGH","expires_in":600,"interval":5}`
-const tokenJSON = `{"access_token":"new-private-sentinel","token_type":"Bearer","scope":"academic:course:read academic:schedule:read","expires_in":3600}`
+const tokenJSON = `{"access_token":"new-private-sentinel","token_type":"Bearer","scope":"academic:course:read academic:schedule:read academic:coursesimulation:read academic:coursesimulation:write academic:coursefavorite:read academic:coursefavorite:write","expires_in":3600}`
 
 func fixture(t *testing.T, handler roundTrip) (*Client, chan time.Duration, chan struct{}, string) {
 	t.Helper()
@@ -126,7 +126,7 @@ func eventually(t *testing.T, f func() bool) {
 	}
 }
 
-func TestWebAuthorizationUsesCourseAndScheduleScopesAndHonorsPollBackoff(t *testing.T) {
+func TestWebAuthorizationUsesRequestedScopesAndHonorsPollBackoff(t *testing.T) {
 	var polls atomic.Int32
 	c, waits, ticks, root := fixture(t, func(r *http.Request) (*http.Response, error) {
 		_ = r.ParseForm()
@@ -183,6 +183,11 @@ func TestWebAuthorizationUsesCourseAndScheduleScopesAndHonorsPollBackoff(t *test
 	if err != nil || token != "new-private-sentinel" || reloaded.credentials.ExpiresAt <= time.Now().UnixMilli() {
 		t.Fatal("approved credential not restored")
 	}
+	for _, scope := range strings.Fields(requestedScope) {
+		if _, err := reloaded.AccessTokenFor(context.Background(), scope); err != nil {
+			t.Fatal("approved permission not restored")
+		}
+	}
 	info, _ := os.Stat(filepath.Join(root, "campus-auth.yaml"))
 	if info.Mode().Perm() != 0600 {
 		t.Fatal("credential file permissions are not private")
@@ -206,6 +211,12 @@ func TestDeniedExpiredAndMissingScopeDoNotReplaceExistingCredential(t *testing.T
 		{"expired", `{"error":"expired_token"}`, "expired", 400, false},
 		{"missing-scope", strings.Replace(tokenJSON, CourseScope, "", 1), "error", 200, true},
 		{"old-course-only", strings.Replace(tokenJSON, " "+ScheduleScope, "", 1), "error", 200, true},
+		{"missing-favorite-read", strings.Replace(tokenJSON, " "+FavoriteReadScope, "", 1), "error", 200, true},
+		{"missing-favorite-write", strings.Replace(tokenJSON, " "+FavoriteWriteScope, "", 1), "error", 200, true},
+		{"old-four-scopes", strings.Replace(tokenJSON, " "+FavoriteReadScope+" "+FavoriteWriteScope, "", 1), "error", 200, true},
+		{"missing-simulation-read", strings.Replace(tokenJSON, " "+SimulationReadScope, "", 1), "error", 200, true},
+		{"missing-simulation-write", strings.Replace(tokenJSON, " "+SimulationWriteScope, "", 1), "error", 200, true},
+		{"old-read-only", strings.Replace(tokenJSON, " "+SimulationReadScope+" "+SimulationWriteScope, "", 1), "error", 200, true},
 		{"duplicate-scope", strings.Replace(tokenJSON, ScheduleScope, CourseScope, 1), "error", 200, true},
 		{"extra-scope", strings.Replace(tokenJSON, CourseScope, CourseScope+" academic:grade:read", 1), "error", 200, true},
 		{"malformed", `{"msg":"private-sentinel"}`, "error", 200, false},

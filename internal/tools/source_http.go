@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+var errSourceConflict = errors.New("来源版本冲突")
+
 var errSourceAuth = errors.New("来源认证失败")
 var errSourceResponse = errors.New("来源响应无效")
 var errSourceUnavailable = errors.New("来源暂时无法连接")
@@ -49,6 +51,8 @@ func sourceJSON(ctx context.Context, client *http.Client, method, address string
 	}
 	defer resp.Body.Close()
 	switch {
+	case resp.StatusCode == http.StatusConflict:
+		return errSourceConflict
 	case resp.StatusCode == http.StatusPreconditionRequired:
 		return errSourceVerification
 	case resp.StatusCode == 401 || resp.StatusCode == 403:

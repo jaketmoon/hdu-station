@@ -9,6 +9,8 @@ import (
 )
 
 type ShowCoursesInput struct {
+	ScheduleSource   string   `json:"scheduleSource,omitempty" jsonschema:"enum=simulation,enum=actual,description=补空默认simulation；仅明确查看真实课表时actual；省略沿用本轮来源"`
+	ChooseFavorite   bool     `json:"chooseFavorite,omitempty" jsonschema:"description=用户要收藏但尚未选定具体班级时true：展示候选并请用户选择，本次不声称收藏成功"`
 	CourseIDs        []string `json:"courseIDs,omitempty" jsonschema:"description=可选：根据名称和上下文选本轮官方候选的原始课程号，可选多个；直接从已有结果选定并重算组合，不必再查一次。仅列候选时省略，不自动选择，不删除其他查询"`
 	TimeOfDay        []string `json:"timeOfDay,omitempty" jsonschema:"description=用户允许的时段；仅查询开课也可过滤，不必读取本人课表；省略保留此前时段，空数组清空时段限制：morning上午1–5节、afternoon下午6–9节、evening晚上10–13节"`
 	MatchSchedule    bool     `json:"matchSchedule" jsonschema:"description=用户是否要求结合本人课表找空闲位置；true时若此前只查开课，将在显示前补做课表检查"`
@@ -20,6 +22,9 @@ type ShowCoursesInput struct {
 func (s *CampusSession) ShowCourses(ctx context.Context, in ShowCoursesInput) (string, error) {
 	s.Calls++
 	if !s.CanShowCourses() {
+		if s.ManagementDisplay() != "" {
+			return "已完成所请求的课程管理查询或操作。", nil
+		}
 		return "", nil
 	}
 	if len(in.CourseIDs) > 0 && s.HasCourseResults() {
@@ -31,9 +36,9 @@ func (s *CampusSession) ShowCourses(ctx context.Context, in ShowCoursesInput) (s
 	if in.TimeOfDay != nil && len(in.TimeOfDay) == 0 && in.AllowedSections == nil {
 		in.AllowedSections = []int{}
 	}
-	if s.HasCourseResults() && (in.MatchSchedule || s.scheduleRequested) && (s.lastFit == nil || s.lastFit.Offerings != s.lastOfferings || len(in.TimeOfDay) > 0 || in.AllowedDays != nil || in.AllowedSections != nil) {
+	if s.HasCourseResults() && (in.MatchSchedule || s.scheduleRequested) && (s.lastFit == nil || s.lastFit.Offerings != s.lastOfferings || (in.ScheduleSource != "" && in.ScheduleSource != s.lastFit.ScheduleSource) || len(in.TimeOfDay) > 0 || in.AllowedDays != nil || in.AllowedSections != nil) {
 		term := s.lastOfferings.Term
-		_, err := s.FitCourses(ctx, FitCoursesInput{TimeOfDay: in.TimeOfDay, SchoolYear: term.SchoolYear, Semester: term.Semester, AllowedDays: in.AllowedDays, AllowedSections: in.AllowedSections})
+		_, err := s.FitCourses(ctx, FitCoursesInput{ScheduleSource: in.ScheduleSource, TimeOfDay: in.TimeOfDay, SchoolYear: term.SchoolYear, Semester: term.Semester, AllowedDays: in.AllowedDays, AllowedSections: in.AllowedSections})
 		if err != nil {
 			return "", err
 		}
@@ -61,7 +66,11 @@ func (s *CampusSession) ShowCourses(ctx context.Context, in ShowCoursesInput) (s
 			preferences.AllowedSections = sections
 		}
 	}
-	return s.Display(), nil
+	display := s.Display()
+	if in.ChooseFavorite {
+		display += "\n\n尚未加入收藏，请选择要收藏的老师和上课时间。"
+	}
+	return display, nil
 }
 
 func campusCell(text string) string {
@@ -129,7 +138,17 @@ func (s *CampusSession) displayOfferingStatus(o Offering, fits map[string]Course
 
 // Only this renderer pairs official class IDs with time and computed status.
 // Model prose is not used to reconstruct authoritative campus tables.
-func (s *CampusSession) Display() string {
+func (s *CampusSession) Display() (text string) {
+	defer func() {
+		if s.lastFit != nil && s.lastFit.ScheduleSource == "simulation" {
+			text = strings.NewReplacer("本人课表", "模拟课表", "与已选课程冲突", "与模拟课表中的课程冲突", "与原课表", "与现有模拟课表", "教务返回该学期空课表", "Neo 返回该学期空模拟课表", "课表中已有该课程", "模拟课表中已有该课程", "来源：校园教务课表。", "来源：Neo 模拟课表。").Replace(text)
+			prefix := "排课依据：Neo 模拟课表尚未完整读取，不使用真实课表替代。\n\n"
+			if s.lastFit.SimulationRevision > 0 {
+				prefix = fmt.Sprintf("排课依据：Neo 模拟课表（版本 %d），模拟加入占用时间，模拟移除释放时间。\n\n", s.lastFit.SimulationRevision)
+			}
+			text = prefix + text
+		}
+	}()
 	r := s.lastOfferings
 	termDisplay := ""
 	if s.lastTermResult != nil {

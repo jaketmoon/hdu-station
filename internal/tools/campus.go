@@ -21,8 +21,8 @@ type CampusCredentials interface {
 	AccessTokenFor(context.Context, string) (string, error)
 }
 
-// CampusClient exposes only these fixed GET routes. No CLI, arbitrary URL,
-// student selector, grade endpoint or business write is available to the Agent.
+// CampusClient exposes fixed campus reads, course collection and simulation management.
+// No CLI, arbitrary URL, student selector or enrollment write is available.
 type CampusClient struct {
 	credentials CampusCredentials
 	http        *http.Client
@@ -71,7 +71,7 @@ func (c *CampusClient) get(ctx context.Context, path string, query url.Values, o
 	switch path {
 	case "/academic/config":
 		scope = ""
-	case "/academic/class/search", "/academic/class/map":
+	case "/academic/class/search", "/academic/class/map", "/academic/course":
 	case "/academic/schedule":
 		scope = campusauth.ScheduleScope
 	default:
@@ -199,6 +199,13 @@ type OfferingResult struct {
 
 // State and request cache live for one answer only, never in SQLite.
 type CampusSession struct {
+	favoriteKnown      map[string]Offering
+	favoriteSelection  map[string]bool
+	favoriteSnapshot   []string
+	managementDisplay  string
+	simulationSnapshot *SimulationData
+	simulationBlocked  bool
+	favoriteReceipts   []FavoriteResult
 	client             *CampusClient
 	progress           func(string)
 	mu                 sync.Mutex

@@ -172,7 +172,8 @@ export function CampusCard({
         </span>
       </summary>
       <p className="field-help">
-        授权读取课程信息和本人课表，核实本学期开课，并把合适的课放入空闲位置。
+        授权读取课程信息、本人课表，以及读取和管理课程收藏、Neo
+        模拟选课方案。模拟方案不会修改学校真实选课；可在对话中查询、添加、修改和删除课程收藏及模拟课表。
       </p>
       <div className="source-actions">
         <button
@@ -214,8 +215,8 @@ export function CampusCard({
           <p className="field-help">核对网页上的授权码</p>
           <code className="campus-user-code">{login.userCode}</code>
           <p className="field-help">
-            仅申请课程信息与本人课表读取权限 · 剩余 {Math.floor(remaining / 60)}{" "}
-            分 {remaining % 60} 秒
+            申请课程与课表读取、模拟方案与课程收藏读写权限 · 剩余{" "}
+            {Math.floor(remaining / 60)} 分 {remaining % 60} 秒
           </p>
           <div className="source-actions">
             <button
@@ -261,6 +262,19 @@ export function CampusCard({
           当前登录尚未记录课表读取权限。点击“重新授权”后，即可按本人课表筛选。
         </p>
       )}
+      {connection.status === "saved" &&
+        (!connection.simulationReadAccess ||
+          !connection.simulationWriteAccess) && (
+          <p role="status" className="field-help">
+            当前登录尚未记录完整的模拟选课权限。点击“重新授权”可补充；现有课程与课表查询仍按原权限可用。
+          </p>
+        )}
+      {connection.status === "saved" &&
+        (!connection.favoriteReadAccess || !connection.favoriteWriteAccess) && (
+          <p role="status" className="field-help">
+            当前登录尚未记录完整的课程收藏权限。点击“重新授权”可补充，已有权限继续保留。
+          </p>
+        )}
       {notice && (
         <p role="status" className="field-help">
           {notice}

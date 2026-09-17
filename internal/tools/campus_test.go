@@ -40,7 +40,10 @@ func campusFixture(t *testing.T, handler campusTransport) *CampusSession {
 		}
 		return handler(r)
 	})
-	return NewCampusSession(c, nil)
+	s := NewCampusSession(c, nil)
+	// These legacy pagination fixtures explicitly exercise the real timetable.
+	s.fitPreferences.ScheduleSource = "actual"
+	return s
 }
 
 const campusConfigJSON = `{"code":0,"data":{"courseQueryDefault":{"schoolYear":"2026-2027","semester":"1"},"scheduleDefault":{"schoolYear":"2026-2027","semester":1}}}`

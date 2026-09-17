@@ -25,6 +25,10 @@ test.beforeEach(async ({ page }) => {
         hasCredential: false,
         status: "logged_out",
         scheduleAccess: false,
+        simulationReadAccess: false,
+        simulationWriteAccess: false,
+        favoriteReadAccess: false,
+        favoriteWriteAccess: false,
       },
       qqStatus: "ready",
       qqEnabled: true,
@@ -89,6 +93,10 @@ test.beforeEach(async ({ page }) => {
               hasCredential: true,
               status: "saved",
               scheduleAccess: true,
+              simulationReadAccess: true,
+              simulationWriteAccess: true,
+              favoriteReadAccess: true,
+              favoriteWriteAccess: true,
             };
             return {
               id: "campus-login",
@@ -107,6 +115,10 @@ test.beforeEach(async ({ page }) => {
               hasCredential: false,
               status: "logged_out",
               scheduleAccess: false,
+              simulationReadAccess: false,
+              simulationWriteAccess: false,
+              favoriteReadAccess: false,
+              favoriteWriteAccess: false,
             };
             return { ...settings.campus };
           },
@@ -250,6 +262,9 @@ test("campus course and schedule authorization fits both windows", async ({
   await expect(campus.locator("summary")).toContainText("尚未登录");
   await campus.getByRole("button", { name: "网页授权" }).click();
   await expect(campus.getByText("ABCD-EFGH")).toBeVisible();
+  await expect(campus).toContainText(
+    "申请课程与课表读取、模拟方案与课程收藏读写权限",
+  );
   await campus
     .getByRole("button", { name: "再次打开授权页" })
     .scrollIntoViewIfNeeded();
@@ -261,6 +276,10 @@ test("campus course and schedule authorization fits both windows", async ({
     "可核实本学期开课；读取本人课表后，可筛选不撞课的班级。",
   );
   await expect(campus).not.toContainText("查询课程类别");
+  await expect(campus).not.toContainText("当前登录尚未记录完整的课程收藏权限");
+  await expect(campus).not.toContainText("当前登录尚未记录完整的模拟选课权限");
+  await expect(campus).toContainText("模拟方案不会修改学校真实选课");
+  await expect(campus).toContainText("可在对话中查询、添加、修改和删除课程收藏及模拟课表");
   await campus.scrollIntoViewIfNeeded();
   expect(
     await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth),

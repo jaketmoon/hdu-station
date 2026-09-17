@@ -111,10 +111,10 @@ func (c *Client) awaitAuthorization(a *attempt) {
 			case nil:
 				// Missing scope never means approval of the requested permission.
 				scopes := strings.Fields(token.Scope)
-				if len(scopes) != 2 || !((scopes[0] == CourseScope && scopes[1] == ScheduleScope) || (scopes[1] == CourseScope && scopes[0] == ScheduleScope)) {
-					a.Status, a.Message = "error", "未获得课程信息和本人课表的读取权限，请重新授权并保留这两项权限。"
+				if !validGrantedScopes(scopes) {
+					a.Status, a.Message = "error", "未获得完整授权，请保留课程信息、本人课表读取、模拟选课方案读写及课程收藏读写这六项权限。"
 				} else {
-					next := credentials{Version: 1, DeviceID: a.deviceID, Token: token.Token, Scopes: []string{CourseScope, ScheduleScope}, Managed: true}
+					next := credentials{Version: 1, DeviceID: a.deviceID, Token: token.Token, Scopes: strings.Fields(requestedScope), Managed: true}
 					if token.ExpiresIn > 0 {
 						next.ExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second).UnixMilli()
 					}
@@ -216,4 +216,23 @@ func (c *Client) Cancel(id string) {
 	if id != "" {
 		c.cancel(id)
 	}
+}
+
+// Accept exactly the requested permissions, independent of response order.
+func validGrantedScopes(scopes []string) bool {
+	expected := strings.Fields(requestedScope)
+	if len(scopes) != len(expected) {
+		return false
+	}
+	remaining := make(map[string]bool, len(expected))
+	for _, scope := range expected {
+		remaining[scope] = true
+	}
+	for _, scope := range scopes {
+		if !remaining[scope] {
+			return false
+		}
+		delete(remaining, scope)
+	}
+	return len(remaining) == 0
 }

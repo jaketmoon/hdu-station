@@ -34,7 +34,7 @@ func TestFollowupKeepsPreviouslyReadCitationWithoutSearchingAgain(t *testing.T) 
 	}
 }
 
-func TestCourseCategoryRemainsUnavailableWhileOfferingAndFitToolsAreReadOnly(t *testing.T) {
+func TestCourseCategoryRemainsUnavailableWithScopedFavoriteTool(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Messages []struct{ Role, Content string }
@@ -43,13 +43,13 @@ func TestCourseCategoryRemainsUnavailableWhileOfferingAndFitToolsAreReadOnly(t *
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 		}
-		allowed := map[string]bool{"search_courses": true, "read_course_posts": true, "get_academic_term": true, "check_course_offerings": true, "fit_courses_to_schedule": true, "show_course_results": true}
+		allowed := map[string]bool{"search_courses": true, "read_course_posts": true, "get_academic_term": true, "check_course_offerings": true, "fit_courses_to_schedule": true, "show_course_results": true, "manage_course_collection": true, "manage_course_simulation": true}
 		if len(request.Tools) != len(allowed) {
 			t.Error("unexpected tool registration")
 		}
 		for _, tool := range request.Tools {
 			if !allowed[tool.Function.Name] {
-				t.Error("agent exposed a tool outside the authorized read operations")
+				t.Error("agent exposed a tool outside the authorized operations")
 			}
 		}
 		if len(request.Messages) == 0 || request.Messages[0].Role != "system" || !strings.Contains(request.Messages[0].Content, "当前未接入课程分类") {
@@ -174,5 +174,44 @@ func TestPrematureCampusDisplayKeepsReadCommunityAnswer(t *testing.T) {
 	}
 	if rounds != 4 || reads != 3 || result.Searches != 1 || result.Reads != 1 || result.CampusCalls != 1 || !strings.Contains(result.Text, "https://www.xiaohongshu.com/explore/"+noteID) || !strings.Contains(result.Text, "交论文") || strings.Contains(result.Text, "尚未取得") || strings.Contains(result.Text, "private-sentinel") {
 		t.Fatal("agent source search/read/citation pipeline incomplete")
+	}
+}
+
+func TestFavoriteReceiptOverridesUnsupportedModelSuccess(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint(fail), func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if fail && calls > 1 {
+					w.WriteHeader(500)
+					return
+				}
+				delta := map[string]any{"content": "收藏成功了（虚构）"}
+				reason := "stop"
+				if calls == 1 {
+					delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "fav-test", "type": "function", "function": map[string]any{"name": "manage_course_collection", "arguments": `{"action":"add","classIDs":["invented"]}`}}}}
+					reason = "tool_calls"
+				}
+				data, _ := json.Marshal(map[string]any{"model": "test", "choices": []any{map[string]any{"delta": delta, "finish_reason": reason}}})
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n", data)
+			}))
+			defer server.Close()
+			engine := Engine{Model: config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}}
+			var streamed strings.Builder
+			result, err := engine.Answer(context.Background(), []storage.Message{{Role: "user", State: "complete", Content: "收藏测试课程"}}, func(e Event) {
+				if e.Kind == "delta" {
+					streamed.WriteString(e.Text)
+				}
+			})
+			if (err != nil) != fail {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(result.Text, "未写入收藏") || strings.Contains(result.Text, "虚构") || strings.Contains(streamed.String(), "虚构") || strings.Contains(result.Text, "check_course_offerings") {
+				t.Fatal("tool receipt was replaced by model claim or leaked protocol")
+			}
+
+		})
 	}
 }
