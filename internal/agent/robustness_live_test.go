@@ -128,7 +128,8 @@ func TestLiveStudentQuestionDataset(t *testing.T) {
 	}
 	defer f.Close()
 	client := tools.NewClient(root)
-	engine := Engine{Model: cfg.Model, Client: client, Sources: cfg.Sources, Campus: tools.NewCampusClient(campus)}
+	var courseContexts tools.CourseContexts
+	engine := Engine{Contexts: &courseContexts, Model: cfg.Model, Client: client, Sources: cfg.Sources, Campus: tools.NewCampusClient(campus)}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	slots := make(chan struct{}, workers)
@@ -148,7 +149,7 @@ func TestLiveStudentQuestionDataset(t *testing.T) {
 			history := []storage.Message{}
 			turns := []studentTurnResult{}
 			for turnIndex, q := range c.Turns {
-				history = append(history, storage.Message{Role: "user", State: "complete", Content: q})
+				history = append(history, storage.Message{ConversationID: c.ID, Role: "user", State: "complete", Content: q})
 				start := time.Now()
 				statuses := []string{}
 				r, e := engine.Answer(context.Background(), history, func(ev Event) {

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"time"
 )
 
@@ -27,11 +26,4 @@ func (s *CampusSession) ReadAcademicTerm(ctx context.Context, _ AcademicTermInpu
 	}
 	s.lastTermResult = &result
 	return result, nil
-}
-
-func displayAcademicTerm(r AcademicTermResult) string {
-	if !r.Term.valid() {
-		return "尚未确认教务默认查询学期。" + campusCell(r.Warning) + "\n\n"
-	}
-	return fmt.Sprintf("教务当前默认查询学期为 **%s 学年第 %d 学期**。按“本学期”核实课程时使用这个学期。\n\n来源：校园教务配置。\n\n", r.Term.SchoolYear, r.Term.Semester)
 }

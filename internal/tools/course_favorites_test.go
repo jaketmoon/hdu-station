@@ -84,7 +84,7 @@ func TestFavoriteMergeAndVerification(t *testing.T) {
 			if posts > 1 {
 				t.Fatal("retried write")
 			}
-			if s.FavoriteDisplay() == "" {
+			if r.Message == "" {
 				t.Fatal("missing receipt")
 			}
 		})

@@ -81,6 +81,7 @@ type activeTurn struct {
 	done               chan struct{}
 }
 type App struct {
+	courseContexts    tools.CourseContexts
 	mu                sync.Mutex
 	sourceMu          sync.Mutex
 	logins            map[string]*sourceLoginSession
@@ -152,7 +153,7 @@ func createApplicationAt(root string) (*App, error) {
 		a.mu.Lock()
 		sources := a.cfg.Sources
 		a.mu.Unlock()
-		return (&agent.Engine{Model: m, Client: a.client, Sources: sources, Campus: tools.NewCampusClient(a.campus)}).Answer(ctx, h, emit)
+		return (&agent.Engine{Model: m, Client: a.client, Sources: sources, Campus: tools.NewCampusClient(a.campus), Contexts: &a.courseContexts}).Answer(ctx, h, emit)
 	}
 	return a, nil
 }
@@ -302,7 +303,11 @@ func (a *App) DeleteConversation(id string) error {
 			return errors.New("请先停止这条对话的回答")
 		}
 	}
-	return a.store.Delete(a.ctx, id)
+	err := a.store.Delete(a.ctx, id)
+	if err == nil {
+		a.courseContexts.Delete(id)
+	}
+	return err
 }
 func (a *App) Cancel(requestID string) {
 	a.mu.Lock()

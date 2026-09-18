@@ -53,7 +53,7 @@ func TestQueryStateDistinguishesRejectedShowFromFailedQuery(t *testing.T) {
 		t.Fatal("display-only call invented query state")
 	}
 	_, _ = s.CheckOfferings(context.Background(), OfferingInput{})
-	if !s.HasQueryResult() || !strings.Contains(s.Display(), "1–12") {
+	if !s.HasQueryResult() || !strings.Contains(s.Display(), "1–48") {
 		t.Fatal("failed query response lost its diagnostic display")
 	}
 }

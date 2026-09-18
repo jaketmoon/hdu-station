@@ -43,7 +43,7 @@ func TestCourseCategoryRemainsUnavailableWithScopedFavoriteTool(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 		}
-		allowed := map[string]bool{"search_courses": true, "read_course_posts": true, "get_academic_term": true, "check_course_offerings": true, "fit_courses_to_schedule": true, "show_course_results": true, "manage_course_collection": true, "manage_course_simulation": true}
+		allowed := map[string]bool{"search_courses": true, "read_course_posts": true, "get_academic_term": true, "check_course_offerings": true, "fit_courses_to_schedule": true, "show_course_results": true, "manage_course_collection": true}
 		if len(request.Tools) != len(allowed) {
 			t.Error("unexpected tool registration")
 		}
@@ -177,7 +177,7 @@ func TestPrematureCampusDisplayKeepsReadCommunityAnswer(t *testing.T) {
 	}
 }
 
-func TestFavoriteReceiptOverridesUnsupportedModelSuccess(t *testing.T) {
+func TestFavoriteStatusIsReturnedToModelWithoutAnswerOverride(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprint(fail), func(t *testing.T) {
 			calls := 0
@@ -187,7 +187,13 @@ func TestFavoriteReceiptOverridesUnsupportedModelSuccess(t *testing.T) {
 					w.WriteHeader(500)
 					return
 				}
-				delta := map[string]any{"content": "收藏成功了（虚构）"}
+				if calls > 1 {
+					payload, _ := io.ReadAll(r.Body)
+					if !strings.Contains(string(payload), "not_written") {
+						t.Error("missing structured rejection")
+					}
+				}
+				delta := map[string]any{"content": "请先提供可核实的课程。"}
 				reason := "stop"
 				if calls == 1 {
 					delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "fav-test", "type": "function", "function": map[string]any{"name": "manage_course_collection", "arguments": `{"action":"add","classIDs":["invented"]}`}}}}
@@ -208,8 +214,11 @@ func TestFavoriteReceiptOverridesUnsupportedModelSuccess(t *testing.T) {
 			if (err != nil) != fail {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if !strings.Contains(result.Text, "未写入收藏") || strings.Contains(result.Text, "虚构") || strings.Contains(streamed.String(), "虚构") || strings.Contains(result.Text, "check_course_offerings") {
-				t.Fatal("tool receipt was replaced by model claim or leaked protocol")
+			if !fail && (result.Text != "请先提供可核实的课程。" || !strings.Contains(streamed.String(), result.Text)) {
+				t.Fatal("model answer was suppressed or replaced")
+			}
+			if fail && result.Text != "" {
+				t.Fatal("injected intermediate receipt on model failure")
 			}
 
 		})

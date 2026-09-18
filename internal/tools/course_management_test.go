@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -60,7 +59,7 @@ func TestCollectionCRUDAndRank(t *testing.T) {
 	call(FavoriteInput{Action: "rank"}, "read")
 	call(FavoriteInput{Action: "remove", ClassIDs: []string{"old"}}, "not_written") // rank is not a personal list
 	call(FavoriteInput{Action: "read"}, "read")
-	if !strings.Contains(s.FavoriteDisplay(), "课程keep") {
+	if s.favoriteKnown["keep"].CourseName != "课程keep" {
 		t.Fatal("missing course details")
 	}
 	s.lastOfferings = &OfferingResult{Queries: []OfferingQuery{{Classes: []Offering{{ClassID: "new", CourseName: "新课"}}}}}

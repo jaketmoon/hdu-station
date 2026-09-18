@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/jaketmoon/hdu-station/internal/campusauth"
 )
@@ -84,23 +83,20 @@ func (s *CampusSession) readFavorites(ctx context.Context, action string, finish
 	if action == "read" {
 		s.favoriteKnown = details
 	}
-	var b strings.Builder
 	title := "当前课程收藏"
 	if action == "rank" {
 		title = "课程收藏排行"
 	}
-	fmt.Fprintf(&b, "%s：共%d个教学班。", title, len(ids))
+	result.Message = fmt.Sprintf("%s：共%d个教学班。", title, len(ids))
 	for i, v := range e.Data {
 		o, ok := details[v.ClassID]
 		if !ok {
 			o = Offering{ClassID: v.ClassID, CourseName: fmt.Sprintf("收藏项%d（详情未取得）", i+1)}
 		}
 		result.Courses = append(result.Courses, o)
-		if action == "rank" {
-			fmt.Fprintf(&b, "\n\n%d. %s（%s，%s），%d人收藏。", i+1, campusCell(o.CourseName), campusCell(o.Teacher), campusCell(o.ClassTime), v.FavCount)
-		}
+
 	}
-	return finish(b.String())
+	return finish(result.Message)
 }
 
 // Decode only public course fields, never classList or other upstream metadata.
@@ -132,7 +128,4 @@ func (s *CampusSession) favoriteDetails(ctx context.Context, ids []string) map[s
 		}
 	}
 	return out
-}
-func (s *CampusSession) ManagementDisplay() string {
-	return strings.TrimSpace(s.FavoriteDisplay() + "\n\n" + s.managementDisplay)
 }

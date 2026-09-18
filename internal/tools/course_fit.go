@@ -16,7 +16,7 @@ type FitCoursesInput struct {
 	TimeOfDay         []string        `json:"timeOfDay,omitempty" jsonschema:"description=用户允许的时段：morning上午1–5节、afternoon下午6–9节、evening晚上10–13节；多项取并集，与allowedSections同传取交集"`
 	CoreKeywords      []CourseKeyword `json:"coreKeywords,omitempty" jsonschema:"description=模糊课程名的核心词，规则同 check_course_offerings"`
 	CourseIDs         []string        `json:"courseIDs,omitempty" jsonschema:"description=从开课工具候选中选定的课程号，可保留多个近似候选；仅消歧包含这些课程号的查询，不删除其他课程"`
-	Courses           []string        `json:"courses,omitempty" jsonschema:"description=待放入课表的完整课程名，最多12门；省略时重算本轮已有课程；本轮尚无课程时单独读取本人课表占用时段"`
+	Courses           []string        `json:"courses,omitempty" jsonschema:"description=待放入课表的完整课程名，最多48门；省略时重算本轮已有课程；本轮尚无课程时单独读取本人课表占用时段"`
 	SchoolYear        string          `json:"schoolYear,omitempty" jsonschema:"description=明确学年时传 YYYY-YYYY，与 semester 同传；本学期省略"`
 	Semester          int             `json:"semester,omitempty" jsonschema:"description=1、2或3，与 schoolYear 同传"`
 	AllowedDays       []int           `json:"allowedDays,omitempty" jsonschema:"description=用户允许上课的星期，周一1到周日7，省略不限制；不要自行添加偏好"`
@@ -29,20 +29,21 @@ type CourseFit struct {
 	Reason    string       `json:"reason"`
 }
 type FitCoursesResult struct {
-	ScheduleSource     string          `json:"scheduleSource"`
-	SimulationRevision int64           `json:"simulationRevision,omitempty"`
-	Term               AcademicTerm    `json:"term"`
-	TermSource         string          `json:"termSource"`
-	CheckedAt          string          `json:"checkedAt"`
-	ScheduleComplete   bool            `json:"scheduleComplete"`
-	ScheduleEmpty      bool            `json:"scheduleEmpty"`
-	BusyTimes          []CourseTime    `json:"busyTimes"`
-	Offerings          *OfferingResult `json:"offerings,omitempty"`
-	Fits               []CourseFit     `json:"fits"`
-	CandidateFits      []CourseFit     `json:"candidateFits,omitempty"`
-	PlanIncomplete     bool            `json:"planIncomplete,omitempty"`
-	SuggestedPlan      []string        `json:"suggestedPlan,omitempty"`
-	Warnings           []string        `json:"warnings,omitempty"`
+	Availability       []ScheduleWindow `json:"availability,omitempty"`
+	ScheduleSource     string           `json:"scheduleSource"`
+	SimulationRevision int64            `json:"simulationRevision,omitempty"`
+	Term               AcademicTerm     `json:"term"`
+	TermSource         string           `json:"termSource"`
+	CheckedAt          string           `json:"checkedAt"`
+	ScheduleComplete   bool             `json:"scheduleComplete"`
+	ScheduleEmpty      bool             `json:"scheduleEmpty"`
+	BusyTimes          []CourseTime     `json:"busyTimes"`
+	Offerings          *OfferingResult  `json:"offerings,omitempty"`
+	Fits               []CourseFit      `json:"fits"`
+	CandidateFits      []CourseFit      `json:"candidateFits,omitempty"`
+	PlanIncomplete     bool             `json:"planIncomplete,omitempty"`
+	SuggestedPlan      []string         `json:"suggestedPlan,omitempty"`
+	Warnings           []string         `json:"warnings,omitempty"`
 }
 type scheduleResult struct {
 	times            []CourseTime
@@ -236,8 +237,9 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 	}
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
-	result = FitCoursesResult{CheckedAt: time.Now().Format(time.RFC3339), BusyTimes: []CourseTime{}, Fits: []CourseFit{}, Warnings: []string{"仅按教务课表核对整学期的周次、星期、节次；未校验选课资格、余量、考试冲突或跨校区通勤。fits表示单门与原课表兼容；suggestedPlan在已核实候选中寻找门数最多、每个课程号最多一个班的无冲突组合；planIncomplete表示搜索达到边界，尚未确认最多门数。组合不是已选课。"}}
+	result = FitCoursesResult{CheckedAt: time.Now().Format(time.RFC3339), BusyTimes: []CourseTime{}, Fits: []CourseFit{}, Warnings: []string{}}
 	defer func() {
+		result.Availability = scheduleWindows(result, s.fitPreferences)
 		s.lastFit = &result
 		s.lastOfferings = result.Offerings
 	}()
@@ -287,7 +289,6 @@ func (s *CampusSession) FitCourses(ctx context.Context, in FitCoursesInput) (res
 	var schedule scheduleResult
 	if in.ScheduleSource == "simulation" {
 		schedule, result.SimulationRevision = s.simulationSchedule(ctx, result.Term)
-		result.Warnings[0] = "按 Neo 模拟课表的有效课程核对整学期周次、星期和节次；模拟加入占用时间，模拟移除释放时间。fits仅代表与该模拟课表兼容，suggestedPlan内的候选彼此也无冲突。未校验资格、余量、考试或通勤；未自动保存方案或执行选课。"
 	} else {
 		schedule = s.schedule(ctx, result.Term)
 	}

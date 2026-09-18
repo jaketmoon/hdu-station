@@ -150,8 +150,8 @@ func (t AcademicTerm) query() url.Values {
 
 type OfferingInput struct {
 	ReplaceCandidates bool            `json:"replaceCandidates,omitempty" jsonschema:"description=仅当用户明确放弃之前候选、只保留本次courses时传true；普通消歧或补查不要传"`
-	Courses           []string        `json:"courses" jsonschema:"description=本次全部具体课程名（1–12门），追问从上一轮推荐提取，不编造别名"`
-	CoreKeywords      []CourseKeyword `json:"coreKeywords,omitempty" jsonschema:"description=可选：为模糊网名提取有辨识度的核心词。工具先查完整名称，没有精确匹配才查核心词；每门最多一个"`
+	Courses           []string        `json:"courses" jsonschema:"description=本次全部具体课程名（1–48门），追问从上一轮推荐提取，不编造别名"`
+	CoreKeywords      []CourseKeyword `json:"coreKeywords,omitempty" jsonschema:"description=模型为社区课程名选择有辨识度的检索词，建议同次提供以覆盖简称/用词差异；完整名未命中才查它。不提供则仅搜索原名，不会自动生成关键词"`
 	CourseIDs         []string        `json:"courseIDs,omitempty" jsonschema:"description=从工具候选中选择最接近的原始课程号；多个近似课程可同时保留。省略时不替模型选择模糊候选，不得编造课程号"`
 	SchoolYear        string          `json:"schoolYear,omitempty" jsonschema:"description=明确学年时传 YYYY-YYYY，必须与 semester 同传；本学期省略由教务配置确定"`
 	Semester          int             `json:"semester,omitempty" jsonschema:"description=学期1/2/3，必须与 schoolYear 同传"`
@@ -199,10 +199,12 @@ type OfferingResult struct {
 
 // State and request cache live for one answer only, never in SQLite.
 type CampusSession struct {
+	previousCollection *FavoriteResult
+	contextAccount     [32]byte
+	contextExpires     time.Time
 	favoriteKnown      map[string]Offering
 	favoriteSelection  map[string]bool
 	favoriteSnapshot   []string
-	managementDisplay  string
 	simulationSnapshot *SimulationData
 	simulationBlocked  bool
 	favoriteReceipts   []FavoriteResult
@@ -238,12 +240,6 @@ func (s *CampusSession) HasCourseResults() bool {
 // discovery or schedule matching. Unresolved candidates may be shown as such.
 func (s *CampusSession) CanShowCourses() bool {
 	return s.HasCourseResults() || s.lastFit != nil || s.lastTermResult != nil
-}
-func (s *CampusSession) CompletionGap() string {
-	if s.CanShowCourses() {
-		return "已有查询结果，请用 show_course_results 展示本次所问内容；不需要追加未请求的推荐、开课或课表检查。"
-	}
-	return ""
 }
 func NewCampusSession(client *CampusClient, progress func(string)) *CampusSession {
 	if progress == nil {
@@ -330,8 +326,8 @@ func cleanCampusText(v string, max int) string {
 }
 
 func validCourses(names []string, allowEmpty bool) ([]string, error) {
-	if len(names) > 12 || (!allowEmpty && len(names) == 0) {
-		return nil, errors.New("请一次传入1–12门具体课程；更多课程需分批核实。")
+	if len(names) > 48 || (!allowEmpty && len(names) == 0) {
+		return nil, errors.New("请一次传入1–48门具体课程；更多课程需分批核实。")
 	}
 	result := []string{}
 	seen := map[string]bool{}
@@ -360,7 +356,7 @@ func (s *CampusSession) CheckOfferings(ctx context.Context, in OfferingInput) (O
 	return r, err
 }
 func (s *CampusSession) offerings(ctx context.Context, in OfferingInput) (OfferingResult, error) {
-	result := OfferingResult{CheckedAt: time.Now().Format(time.RFC3339), Queries: []OfferingQuery{}, Warnings: []string{"仅核实该学期检索到的开课记录，不代表仍有余量、符合选课资格或已完成选课。检索分页覆盖未确认，未检索到不等于未开课。"}}
+	result := OfferingResult{CheckedAt: time.Now().Format(time.RFC3339), Queries: []OfferingQuery{}}
 	names, err := validCourses(in.Courses, false)
 	if err != nil {
 		result.Warnings = append(result.Warnings, err.Error())
@@ -415,22 +411,12 @@ func (s *CampusSession) offerings(ctx context.Context, in OfferingInput) (Offeri
 }
 
 func lookupKeywords(names []string, hints []CourseKeyword, ids []string) (map[string]string, error) {
-	if len(hints) > 12 || len(ids) > 24 {
-		return nil, errors.New("核心词最多12个，选定课程号最多24个。")
+	if len(hints) > 48 || len(ids) > 96 {
+		return nil, errors.New("核心词最多48个，选定课程号最多96个。")
 	}
 	result := map[string]string{}
 	for _, name := range names {
-		core := strings.Trim(name, "《》「」")
-		for _, suffix := range []string{"导论", "概论", "鉴赏", "赏析", "入门", "基础"} {
-			if strings.HasSuffix(core, suffix) && len([]rune(strings.TrimSuffix(core, suffix))) >= 2 {
-				core = strings.TrimSuffix(core, suffix)
-				break
-			}
-		}
-		if core == name && len([]rune(core)) > 4 {
-			core = string([]rune(core)[:4])
-		}
-		result[name] = core
+		result[name] = name
 	}
 	seen := map[string]bool{}
 	for _, hint := range hints {
@@ -456,7 +442,7 @@ func selectCourseIDs(query OfferingQuery, ids []string) OfferingQuery {
 	if len(ids) == 0 {
 		query.NeedsSelection = len(query.Classes) == 0 && len(query.Candidates) > 0
 		if query.NeedsSelection {
-			query.Warning = "名称尚未选定：请根据原名和上下文选最接近的候选课程号（相似者可选多个），将 courseIDs 传入 show_course_results 或同一工具继续核实；尚未筛选不表示冲突或不可放入。"
+			query.Warning = "名称尚未选定：请结合上下文判断候选是否对应；无关候选可忽略。收藏可直接传判断对应的已核实classIDs；排课可用courseIDs选定。"
 		}
 		return query
 	}

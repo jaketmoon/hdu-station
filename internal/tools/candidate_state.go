@@ -1,6 +1,6 @@
 package tools
 
-const candidateLimitWarning = "本轮保留的课程查询已达12个；本次新增查询未执行，已有结果保留。请明确需要保留哪些课程后再查询。"
+const candidateLimitWarning = "本轮保留的课程查询已达48个；本次新增查询未执行，已有结果保留。请明确需要保留哪些课程后再查询。"
 
 func (s *CampusSession) candidateLimit(names []string, term AcademicTerm, replace bool) bool {
 	seen := map[string]bool{}
@@ -12,7 +12,7 @@ func (s *CampusSession) candidateLimit(names []string, term AcademicTerm, replac
 	for _, name := range names {
 		seen[name] = true
 	}
-	return len(seen) > 12
+	return len(seen) > 48
 }
 
 // Merge within this answer and semester, preserving each original query. A

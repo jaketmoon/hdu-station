@@ -130,24 +130,27 @@ func TestCandidateStateLimitRejectsNewQueriesWithoutDiscardingExisting(t *testin
 			s, searches := candidateStateFixture(t)
 			ctx := context.Background()
 			names := []string{}
-			for i := 0; i < 12; i++ {
+			for i := 0; i < 48; i++ {
 				names = append(names, fmt.Sprintf("测试课程%02d", i))
 			}
-			_, _ = s.CheckOfferings(ctx, OfferingInput{Courses: names})
+			for start := 0; start < len(names); start += 12 {
+                _, _ = s.CheckOfferings(ctx, OfferingInput{Courses: names[start:start+12]})
+                s.requests = 0 // Capacity test spans fresh per-turn HTTP budgets.
+            }
 			before := searches.Load()
 			if viaFit {
-				_, _ = s.FitCourses(ctx, FitCoursesInput{Courses: []string{"第十三门课"}})
+				_, _ = s.FitCourses(ctx, FitCoursesInput{Courses: []string{"第四十九门课"}})
 			} else {
-				_, _ = s.CheckOfferings(ctx, OfferingInput{Courses: []string{"第十三门课"}})
+				_, _ = s.CheckOfferings(ctx, OfferingInput{Courses: []string{"第四十九门课"}})
 			}
-			if searches.Load() != before || len(s.lastOfferings.Queries) != 12 || !strings.Contains(s.Display(), candidateLimitWarning) {
+			if searches.Load() != before || len(s.lastOfferings.Queries) != 48 || !strings.Contains(s.Display(), candidateLimitWarning) {
 				t.Fatalf("capacity silently lost data or issued query: %d -> %d", before, searches.Load())
 			}
 			_, _ = s.CheckOfferings(ctx, OfferingInput{Courses: []string{names[0]}})
-			if len(s.lastOfferings.Queries) != 12 {
+			if len(s.lastOfferings.Queries) != 48 {
 				t.Fatal("existing query was not allowed at capacity")
 			}
-			_, _ = s.CheckOfferings(ctx, OfferingInput{Courses: []string{"第十三门课"}, ReplaceCandidates: true})
+			_, _ = s.CheckOfferings(ctx, OfferingInput{Courses: []string{"第四十九门课"}, ReplaceCandidates: true})
 			if len(s.lastOfferings.Queries) != 1 || searches.Load() != before+1 {
 				t.Fatal("explicit narrowing did not release capacity")
 			}

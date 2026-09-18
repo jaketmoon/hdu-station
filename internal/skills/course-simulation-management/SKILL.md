@@ -10,4 +10,6 @@ update保留其他条目：items中ENROLL添加已核实班级，DROP模拟移�
 
 用户要求无冲突时传requireNoConflicts=true，工具按变更后的模拟课表全部周次节次验证；未知时间不视为无冲突。补空使用 fit_courses_to_schedule 的 scheduleSource="simulation"，依据当前 effectiveCourses；保存前的 requireNoConflicts 仍需保留，以核对最新方案。只是了解推荐或查询真实课表时不必接此Skill。可以推荐→核实→模拟加入，也可收藏→核实→模拟加入，或模拟课→核实→收藏；涉及两个目标分别执行，不跨目标暗中同步。
 
-所有修改均在show_course_results之前完成；最终展示有效模拟课表及真实/模拟状态，诚实报告冲突、未知或部分操作成功，不声称真实选课完成。
+按用户请求完成需要的操作后，由模型简洁总结结构化结果及真实/模拟状态，诚实报告冲突、未知或部分操作成功，不声称真实选课完成。
+
+已有模拟课程需“每门最多一班、自由组合不冲突”时使用 course-simulation-replanning 的 plan_course_simulation，再一次 update 保存。不要直接把已有待选课程交给普通插空工具，否则它们会被当成固定占用。真实已选课程参与冲突检查且不属于这个重排能力的可删除集合。

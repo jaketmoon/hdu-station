@@ -59,7 +59,8 @@ func TestCurrentTermToolIsRegisteredAndCanShowItsSafeFailure(t *testing.T) {
 		rounds++
 		name := "get_academic_term"
 		if rounds > 1 {
-			name = "show_course_results"
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"尚未确认教务默认查询学期\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"term-%d\",\"function\":{\"name\":\"%s\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n", rounds, name)

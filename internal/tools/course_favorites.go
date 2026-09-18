@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/jaketmoon/hdu-station/internal/campusauth"
 )
@@ -18,7 +17,7 @@ var favoriteGate = make(chan struct{}, 1)
 type FavoriteInput struct {
 	Action         string   `json:"action,omitempty" jsonschema:"enum=read,enum=rank,enum=add,enum=remove,enum=update,enum=replace,enum=clear,description=read查看收藏；rank排行；add添加；remove删除classIDs；update删除removeClassIDs同时添加classIDs；replace仅保留classIDs；clear清空，后两者必须用户明确要求"`
 	RemoveClassIDs []string `json:"removeClassIDs,omitempty" jsonschema:"description=update时明确要移除的本轮收藏列表classID；其余收藏保留"`
-	ClassIDs       []string `json:"classIDs,omitempty" jsonschema:"description=本轮核实或收藏read返回的教学班classID，最多100个；add/replace为目标，remove为删除项。新增班须核实，多个班不明确时先询问。"`
+	ClassIDs       []string `json:"classIDs,omitempty" jsonschema:"description=可信课程上下文或本轮工具返回的教学班classID，最多100个；同课允许多个班，全部收藏时传所有符合条件的班级。近似名称由模型判断对应后选择ID。"`
 	RequireFit     bool     `json:"requireFit,omitempty" jsonschema:"description=用户要求无冲突或插空后收藏时必须true；班级必须来自最新suggestedPlan。只核实后收藏时false，不额外读课表。"`
 }
 type FavoriteEntry struct {
@@ -26,12 +25,16 @@ type FavoriteEntry struct {
 	FavCount int    `json:"favCount,omitempty"`
 }
 type FavoriteResult struct {
-	Action   string          `json:"action,omitempty"`
-	Entries  []FavoriteEntry `json:"entries,omitempty"`
-	Status   string          `json:"status"`
-	Message  string          `json:"message"`
-	NextStep string          `json:"nextStep,omitempty"`
-	Courses  []Offering      `json:"courses,omitempty"`
+	CourseCount int             `json:"courseCount,omitempty"`
+	ClassCount  int             `json:"classCount,omitempty"`
+	AddedCount  int             `json:"addedCount,omitempty"`
+	TotalCount  int             `json:"totalCount,omitempty"`
+	Action      string          `json:"action,omitempty"`
+	Entries     []FavoriteEntry `json:"entries,omitempty"`
+	Status      string          `json:"status"`
+	Message     string          `json:"message"`
+	NextStep    string          `json:"nextStep,omitempty"`
+	Courses     []Offering      `json:"courses,omitempty"`
 }
 
 func (s *CampusSession) AddFavorites(ctx context.Context, in FavoriteInput) (FavoriteResult, error) {
@@ -44,6 +47,13 @@ func (s *CampusSession) ManageFavorites(ctx context.Context, in FavoriteInput) (
 	result := FavoriteResult{Status: "not_written", Action: in.Action}
 	finish := func(message string) (FavoriteResult, error) {
 		result.Message = message
+		if result.Status == "confirmed" || result.Status == "already_present" {
+			courses := map[string]bool{}
+			for _, o := range result.Courses {
+				courses[o.CourseID] = true
+			}
+			result.CourseCount, result.ClassCount = len(courses), len(result.Courses)
+		}
 		s.favoriteReceipts = append(s.favoriteReceipts, result)
 		return result, nil
 	}
@@ -67,7 +77,7 @@ func (s *CampusSession) ManageFavorites(ctx context.Context, in FavoriteInput) (
 	}
 	if adding && len(in.ClassIDs) > 0 && s.lastOfferings == nil && len(s.favoriteSelection) == 0 {
 		result.NextStep = "请立即按上下文课程、老师和时间调用 check_course_offerings 重新定位，再调用收藏；用户已授权，无需再询问是否重查。"
-		return finish("未写入收藏：本轮尚未核实并选定教学班。")
+		return finish("未写入收藏：尚无可信的教学班记录。")
 	}
 	known := map[string]Offering{}
 	for id := range s.favoriteSelection {
@@ -79,8 +89,12 @@ func (s *CampusSession) ManageFavorites(ctx context.Context, in FavoriteInput) (
 	}
 	if s.lastOfferings != nil {
 		for _, q := range s.lastOfferings.Queries {
-			if !q.NeedsSelection {
-				for _, o := range q.Classes {
+			for _, o := range q.Classes {
+				known[o.ClassID] = o
+			}
+			// Selecting a returned class ID is the model's name-match decision.
+			for _, candidate := range q.Candidates {
+				for _, o := range candidate.Classes {
 					known[o.ClassID] = o
 				}
 			}
@@ -97,7 +111,7 @@ func (s *CampusSession) ManageFavorites(ctx context.Context, in FavoriteInput) (
 	for _, id := range in.ClassIDs {
 		o, ok := known[id]
 		if adding && (!ok || id == "") {
-			return finish("未写入收藏：包含本轮尚未核实或尚未选定的教学班，请重新核实。")
+			return finish("未写入收藏：包含未经工具核实的教学班，请先核实。")
 		}
 		if adding && in.RequireFit && !plan[id] {
 			return finish("未写入收藏：所选班级不在最新核实的无冲突组合中，请先完成课表适配。")
@@ -197,9 +211,10 @@ func (s *CampusSession) ManageFavorites(ctx context.Context, in FavoriteInput) (
 			}
 		}
 	}
+	result.TotalCount = len(union)
 	if sameIDs(union, existing) {
 		result.Status = "already_present"
-		return finish("已核实：收藏已符合本次要求，无需重复修改。")
+		return finish("已在收藏中。")
 	}
 	body, _ := json.Marshal(map[string]any{"classes": union})
 	var response struct {
@@ -221,10 +236,20 @@ func (s *CampusSession) ManageFavorites(ctx context.Context, in FavoriteInput) (
 	}
 	if complete {
 		result.Status = "confirmed"
-		if in.Action == "add" {
-			return finish("已复查：所选教学班均在收藏中，原有收藏已保留。收藏不代表已选课。")
+		existingSet := map[string]bool{}
+		for _, id := range existing {
+			existingSet[id] = true
 		}
-		return finish(fmt.Sprintf("已复查：收藏已按要求更新，当前共%d个教学班；未指定移除的内容已保留，未执行选课。", len(after)))
+		for _, id := range ids {
+			if adding && !existingSet[id] {
+				result.AddedCount++
+			}
+		}
+		result.TotalCount = len(after)
+		if in.Action == "add" {
+			return finish("收藏已确认。")
+		}
+		return finish(fmt.Sprintf("收藏已更新，共%d个教学班。", len(after)))
 	}
 	result.Status = "unknown"
 	if writeErr == nil && response.Code != nil && *response.Code != 0 {
@@ -232,27 +257,4 @@ func (s *CampusSession) ManageFavorites(ctx context.Context, in FavoriteInput) (
 		return finish("未写入收藏：服务拒绝了请求，请检查收藏授权后再试。")
 	}
 	return finish("收藏结果尚未确认：写入后未能核实完整列表，可能已经生效；未自动重试，请稍后核对收藏。")
-}
-
-func (s *CampusSession) FavoriteDisplay() string {
-	var b strings.Builder
-	for i, r := range s.favoriteReceipts {
-		message := r.Message
-		if r.Status == "read" {
-			for _, later := range s.favoriteReceipts[i+1:] {
-				if later.Status == "confirmed" || later.Status == "unknown" {
-					message = strings.Replace(message, "当前课程收藏", "修改前读取的课程收藏", 1)
-					break
-				}
-			}
-		}
-		b.WriteString(message + "\n\n")
-		if r.Status == "confirmed" || r.Status == "already_present" || (r.Status == "read" && r.Action != "rank") {
-			for _, o := range r.Courses {
-				b.WriteString("- " + campusCell(o.CourseName) + "（" + campusCell(o.Teacher) + "，" + campusCell(o.ClassTime) + "）\n")
-			}
-			b.WriteString("\n")
-		}
-	}
-	return strings.TrimSpace(b.String())
 }

@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/jaketmoon/hdu-station/internal/campusauth"
 )
@@ -95,9 +93,7 @@ func (s *CampusSession) ManageSimulation(ctx context.Context, in SimulationInput
 			s.lastFit = nil
 		}
 		result.Message = message
-		s.managementDisplay = message
 		if data != nil {
-			s.managementDisplay += "\n\n" + displaySimulation(data)
 			copy := *data
 			copy.ActualCourses = append([]SimulationCourse{}, data.ActualCourses...)
 			copy.EffectiveCourses = append([]SimulationCourse{}, data.EffectiveCourses...)
@@ -136,7 +132,7 @@ func (s *CampusSession) ManageSimulation(ctx context.Context, in SimulationInput
 	if in.Action == "read" {
 		s.simulationSnapshot = current
 		result.Status = "read"
-		return finish("已读取 Neo 模拟课表，学校真实课表未修改。", current)
+		return finish("已读取模拟课表。", current)
 	}
 	prior := s.simulationSnapshot
 	if prior == nil || prior.SchoolYear != term.SchoolYear || prior.Semester != term.Semester || in.ExpectedRevision == nil {
@@ -236,7 +232,7 @@ func (s *CampusSession) ManageSimulation(ctx context.Context, in SimulationInput
 	if readErr == nil && sameSimulation(items, after.SimulationItems) {
 		s.simulationSnapshot = after
 		result.Status = "confirmed"
-		return finish("已复查：Neo 模拟课表已按要求更新，学校真实选课未改变。", after)
+		return finish("模拟课表已更新并复查。", after)
 	}
 	s.simulationBlocked = true
 	result.Status = "unknown"
@@ -306,42 +302,4 @@ func simulationFits(d *SimulationData, target map[string]string, known map[strin
 		}
 	}
 	return true
-}
-func displaySimulation(d *SimulationData) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "**%s 学年第%d学期 · 模拟课表**\n\n", campusCell(d.SchoolYear), d.Semester)
-	b.WriteString("| 课程 | 老师 | 上课时间 | 状态 |\n| --- | --- | --- | --- |\n")
-	actual := map[string]bool{}
-	drops := map[string]bool{}
-	for _, i := range d.SimulationItems {
-		if i.Intent == "DROP" {
-			drops[i.ClassID] = true
-		}
-	}
-	for _, o := range d.ActualCourses {
-		actual[o.ClassID] = true
-		state := "真实已选，保留"
-		if drops[o.ClassID] {
-			state = "模拟移除，真实仍已选"
-		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", campusCell(o.CourseName), campusCell(o.Teacher), campusCell(o.ClassTime), state)
-	}
-	for _, o := range d.EffectiveCourses {
-		if actual[o.ClassID] {
-			continue
-		}
-		fmt.Fprintf(&b, "| %s | %s | %s | 模拟加入 |\n", campusCell(o.CourseName), campusCell(o.Teacher), campusCell(o.ClassTime))
-	}
-	if len(d.ActualCourses) == 0 && len(d.EffectiveCourses) == 0 {
-		b.WriteString("\n该学期模拟课表为空。\n")
-	}
-	target := map[string]string{}
-	for _, i := range d.SimulationItems {
-		target[i.ClassID] = i.Intent
-	}
-	if !simulationFits(d, target, nil) {
-		b.WriteString("\n当前模拟课表存在时间冲突或时间信息不完整，不能确认无冲突。\n")
-	}
-	b.WriteString("\n仅为 Neo 模拟方案，不改变学校真实选课。")
-	return b.String()
 }

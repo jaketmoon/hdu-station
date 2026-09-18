@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-func TestPendingCampusSelectionUsesBoundToolChoiceWithinBudget(t *testing.T) {
+func TestModelChoosesToolsWithinBudget(t *testing.T) {
 	for _, tc := range []struct {
 		required string
 		round    int
@@ -32,10 +32,10 @@ func TestPendingCampusSelectionUsesBoundToolChoiceWithinBudget(t *testing.T) {
 				Function struct{ Name string }
 			}
 			_ = json.Unmarshal(body["tool_choice"], &choice)
-			if tc.force && (choice.Type != "function" || choice.Function.Name != "fit_courses_to_schedule") {
-				t.Error("pending selection was allowed to skip confirmation")
+			if (tc.round < 6) != (len(body["tools"]) > 0) {
+				t.Error("tool budget not respected")
 			}
-			if !tc.force && len(body["tool_choice"]) > 0 {
+			if len(body["tool_choice"]) > 0 {
 				t.Error("forced an unavailable or budget-exhausted tool")
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -43,7 +43,6 @@ func TestPendingCampusSelectionUsesBoundToolChoiceWithinBudget(t *testing.T) {
 		}))
 		p := NewProvider(config.Model{BaseURL: server.URL, APIKey: "test", Name: "test"}, nil)
 		p.state.round = tc.round
-		p.requiredTool = func() string { return tc.required }
 		tool, err := utils.InferTool("fit_courses_to_schedule", "test", tools.NewCampusSession(nil, nil).FitCourses)
 		if err != nil {
 			t.Fatal(err)
